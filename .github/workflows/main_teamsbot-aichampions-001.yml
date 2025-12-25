@@ -14,15 +14,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read #This is required for actions/checkout
-
+    
     steps:
       - uses: actions/checkout@v4
-
+      
       - name: Set up Node.js version
         uses: actions/setup-node@v3
         with:
           node-version: '20.x'
-
+      
+      # ✅ ADD THIS - Install dependencies
+      - name: npm install, build, and test
+        run: |
+          npm ci
+          npm run build --if-present
+      
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
@@ -35,7 +41,7 @@ jobs:
     permissions:
       id-token: write #This is required for requesting the JWT
       contents: read #This is required for actions/checkout
-
+    
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
@@ -48,7 +54,7 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_619E0D53D08F4533BB9B21D6EAAA2154 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_EC5026E6712845D59D6C66D6EDEA7D12 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_25841A74A099471B93686ED1DE7F2882 }}
-
+      
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
@@ -56,4 +62,3 @@ jobs:
           app-name: 'teamsbot-aichampions-001'
           slot-name: 'Production'
           package: .
-          
