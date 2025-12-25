@@ -9,14 +9,16 @@
     "build": "npm install"
   },
   "dependencies": {
-    "botbuilder": "4.21.1",
-    "dotenv": "^16.0.3",
-    "restify": "^11.1.0",
-    "botbuilder-dialogs": "4.21.1"
-
+    "botbuilder": "4.23.3",
+    "botbuilder-core": "4.23.3",
+    "botbuilder-dialogs": "4.23.3",
+    "botframework-connector": "4.23.3",
+    "botframework-streaming": "4.23.3",
+    "dotenv": "16.4.5",
+    "restify": "11.1.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "3.1.9"
   },
   "engines": {
     "node": ">=20.0.0"
