@@ -12,8 +12,13 @@ node_modules/
 
 # misc
 .env
-.deployment
+# .deployment
 .DS_Store
+*.log
+.vscode/
 
 # Dev tool directories
 /devTools/
+
+
+
