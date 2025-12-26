@@ -1,78 +1,84 @@
-const { ActivityHandler, MessageFactory } = require('botbuilder');
+const { ActivityHandler } = require('botbuilder');
+const { saveQuestion, getQuestions, getTotalQuestions } = require('./db');
 
 class TeamsBot extends ActivityHandler {
     constructor() {
         super();
 
-        // Conversation state storage
-        this.conversationReferences = {};
-        this.conversationStates = {};
-
-        // Handle incoming messages
         this.onMessage(async (context, next) => {
-            const text = context.activity.text.toLowerCase().trim();
+            const text = context.activity.text.trim();
             const conversationId = context.activity.conversation.id;
+            const userId = context.activity.from.id;
+            const userName = context.activity.from.name;
 
-            // Initialize state for this conversation
-            if (!this.conversationStates[conversationId]) {
-                this.conversationStates[conversationId] = { count: 0 };
-            }
+            let responseText = '';
 
-            const state = this.conversationStates[conversationId];
-
-            // Command handlers
-            if (text === '/reset') {
-                this.conversationStates[conversationId] = { count: 0 };
-                await context.sendActivity('✅ Conversation state reset!');
+            // Command: /history - Show saved questions
+            if (text.toLowerCase() === '/history') {
+                const questions = await getQuestions(conversationId);
+                
+                if (questions.length === 0) {
+                    responseText = '📋 No questions saved yet. Ask me something!';
+                } else {
+                    responseText = `📋 **Your Question History:**\n\n`;
+                    questions.slice(0, 5).forEach((q, index) => {
+                        responseText += `${index + 1}. **Q:** ${q.question}\n   **A:** ${q.answer}\n   ⏰ ${q.time}\n\n`;
+                    });
+                }
             }
-            else if (text === '/count') {
-                await context.sendActivity(`📊 Current count: ${state.count}`);
+            // Command: /stats - Show total questions
+            else if (text.toLowerCase() === '/stats') {
+                const total = await getTotalQuestions();
+                responseText = `📊 **Statistics:**\n- Total questions saved: ${total}\n- Your user ID: ${userId}`;
             }
-            else if (text === '/help') {
-                const helpText = `
-🤖 **Available Commands:**
-- **/reset** - Reset conversation
-- **/count** - Show message count
-- **/help** - Show this help
-- **/state** - Show current state
-- **hello** - Get a greeting
-                `;
-                await context.sendActivity(helpText);
+            // Command: /help
+            else if (text.toLowerCase() === '/help') {
+                responseText = `🤖 **Available Commands:**\n\n` +
+                    `• **/help** - Show this help\n` +
+                    `• **/history** - Show your question history\n` +
+                    `• **/stats** - Show database statistics\n` +
+                    `• **Ask any question** - I'll save it to database!\n\n` +
+                    `Try asking me: "What is AI?"`;
             }
-            else if (text === '/state') {
-                await context.sendActivity(`State: ${JSON.stringify(state, null, 2)}`);
-            }
-            else if (text.includes('hello') || text.includes('hi')) {
-                await context.sendActivity('👋 Hello! How can I help you today?');
-                state.count++;
-            }
+            // Regular question - Save to database
             else {
-                // Echo back the message
-                state.count++;
-                await context.sendActivity(`[${state.count}] You said: ${context.activity.text}`);
-            }
+                // Generate answer
+                if (text.toLowerCase().includes('hello') || text.toLowerCase().includes('hi')) {
+                    responseText = `👋 Hello ${userName}! How can I help you today?`;
+                } else if (text.toLowerCase().includes('what is ai')) {
+                    responseText = '🤖 AI (Artificial Intelligence) is the simulation of human intelligence by machines, especially computer systems.';
+                } else if (text.toLowerCase().includes('what is ml')) {
+                    responseText = '📊 Machine Learning (ML) is a subset of AI that enables systems to learn and improve from experience without being explicitly programmed.';
+                } else {
+                    responseText = `Thank you for your question: "${text}"\n\nI'm learning and will improve my responses! This has been saved to the database. 💾`;
+                }
 
-            // By calling next() you ensure that the next BotHandler is run.
-            await next();
-        });
-
-        // Handle members added (bot added to team/chat)
-        this.onMembersAdded(async (context, next) => {
-            const membersAdded = context.activity.membersAdded;
-            const welcomeText = '👋 Hello! I\'m your AI Champions Bot. Type **/help** to see what I can do!';
-
-            for (let member of membersAdded) {
-                if (member.id !== context.activity.recipient.id) {
-                    await context.sendActivity(MessageFactory.text(welcomeText));
+                // Save question and answer to database
+                const saved = await saveQuestion(conversationId, userId, userName, text, responseText);
+                
+                if (saved) {
+                    responseText += '\n\n✅ *Question saved to database!*';
                 }
             }
 
+            // Send response
+            await context.sendActivity(responseText);
+
             await next();
         });
-    }
 
-    async run(context) {
-        await super.run(context);
+        this.onMembersAdded(async (context, next) => {
+            const welcomeText = '👋 **Welcome to AI Champions Bot!**\n\n' +
+                'Type **/help** to see what I can do!\n\n' +
+                'All your questions will be saved to the database. 💾';
+            
+            for (let member of context.activity.membersAdded) {
+                if (member.id !== context.activity.recipient.id) {
+                    await context.sendActivity(welcomeText);
+                }
+            }
+            await next();
+        });
     }
 }
 

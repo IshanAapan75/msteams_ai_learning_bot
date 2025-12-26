@@ -7,7 +7,7 @@ const client = new CosmosClient({
 });
 
 const database = client.database(process.env.COSMOS_DATABASE || "ChatBotDB");
-const container = database.container(process.env.COSMOS_CONTAINER || "Questions");
+const container = database.container(process.env.COSMOS_CONTAINER || "Quiz");
 
 // Save question to database
 async function saveQuestion(conversationId, userId, userName, question, answer) {
