@@ -1,4 +1,4 @@
-const restify = require('restify');
+const express = require('express');
 const next = require('next');
 const { BotFrameworkAdapter, ConversationState, MemoryStorage } = require('botbuilder');
 const { TeamsBot } = require('./bot');
@@ -8,12 +8,13 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
-    const server = restify.createServer();
-    server.use(restify.plugins.bodyParser());
+    const server = express();
+    server.use(express.json());
+    server.use(express.urlencoded({ extended: true }));
 
     const port = process.env.PORT || 3978;
     server.listen(port, () => {
-        console.log(`\n${server.name} listening on ${server.url}`);
+        console.log(`\nServer listening on port ${port}`);
         console.log('\nBot is ready!');
     });
 
