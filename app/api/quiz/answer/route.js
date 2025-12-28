@@ -1,6 +1,7 @@
-import { containers } from "@/lib/cosmos";
-import { addXp } from "@/lib/xp";
-import { assignBadges } from "@/lib/badges";
+// import { containers } from "@/lib/cosmos";
+import { containers } from "../../../../lib/cosmos";
+import { addXp } from "../../../../lib/xp";
+import { assignBadges } from "../../../../lib/badges";
 
 export async function POST(req) {
   const { userId, questionId, answer } = await req.json();

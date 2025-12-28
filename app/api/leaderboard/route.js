@@ -1,4 +1,5 @@
-import { containers } from "@/lib/cosmos";
+// import { containers } from "@/lib/cosmos";
+import { containers } from "../../../lib/cosmos";
 
 export async function GET() {
   const query = {

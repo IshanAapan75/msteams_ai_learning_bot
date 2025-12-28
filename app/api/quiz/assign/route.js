@@ -1,4 +1,6 @@
-import { containers } from "@/lib/cosmos";
+// import { containers } from "@/lib/cosmos";
+
+import { containers } from "../../../../lib/cosmos";
 
 export async function POST(req) {
   const { userId } = await req.json();
