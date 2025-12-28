@@ -1,49 +1,50 @@
 const restify = require('restify');
+const next = require('next');
 const { BotFrameworkAdapter, ConversationState, MemoryStorage } = require('botbuilder');
 const { TeamsBot } = require('./bot');
 
-// Create HTTP server
-const server = restify.createServer();
-server.use(restify.plugins.bodyParser());
+const dev = process.env.NODE_ENV !== 'production';
+const app = next({ dev });
+const handle = app.getRequestHandler();
 
-// Server listening on port
-const port = process.env.PORT || 3978;
-server.listen(port, () => {
-    console.log(`\n${server.name} listening on ${server.url}`);
-    console.log('\nBot is ready!');
-});
+app.prepare().then(() => {
+    const server = restify.createServer();
+    server.use(restify.plugins.bodyParser());
 
-// Create adapter
-const adapter = new BotFrameworkAdapter({
-    appId: process.env.MicrosoftAppId,
-    appPassword: process.env.MicrosoftAppPassword,
-    appType: process.env.MicrosoftAppType || 'SingleTenant',
-    channelAuthTenant: process.env.MicrosoftAppTenantId
-});
-
-// Error handler
-adapter.onTurnError = async (context, error) => {
-    console.error(`\n [onTurnError] unhandled error: ${error}`);
-    await context.sendActivity('The bot encountered an error.');
-    await conversationState.delete(context);
-};
-
-// State management
-const memoryStorage = new MemoryStorage();
-const conversationState = new ConversationState(memoryStorage);
-
-// Create bot
-const bot = new TeamsBot(conversationState);
-
-// Listen for incoming requests - CRITICAL!
-server.post('/api/messages', async (req, res) => {
-    await adapter.process(req, res, async (context) => {
-        await bot.run(context);
+    const port = process.env.PORT || 3978;
+    server.listen(port, () => {
+        console.log(`\n${server.name} listening on ${server.url}`);
+        console.log('\nBot is ready!');
     });
-});
 
-// Health check endpoint
-server.get('/', (req, res, next) => {
-    res.send({ status: 'Bot is running!' });
-    return next();
+    const adapter = new BotFrameworkAdapter({
+        appId: process.env.MicrosoftAppId,
+        appPassword: process.env.MicrosoftAppPassword,
+        appType: process.env.MicrosoftAppType || 'SingleTenant',
+        channelAuthTenant: process.env.MicrosoftAppTenantId
+    });
+
+    adapter.onTurnError = async (context, error) => {
+        console.error(`\n [onTurnError] unhandled error: ${error}`);
+        await context.sendActivity('The bot encountered an error.');
+        await conversationState.delete(context);
+    };
+
+    const memoryStorage = new MemoryStorage();
+    const conversationState = new ConversationState(memoryStorage);
+    const bot = new TeamsBot(conversationState);
+
+    server.post('/api/messages', (req, res) => {
+        adapter.process(req, res, async (context) => {
+            await bot.run(context);
+        });
+    });
+
+    server.get('*', (req, res) => {
+        return handle(req, res);
+    });
+    
+    server.post('*', (req, res) => {
+        return handle(req, res);
+    });
 });
