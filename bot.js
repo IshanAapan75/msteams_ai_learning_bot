@@ -1,7 +1,8 @@
-const { ActivityHandler, CardFactory } = require("botbuilder");
+const { TeamsActivityHandler, CardFactory } = require("botbuilder");
 const { containers } = require("./lib/cosmos");
+const { TeamsInfo } = require("botbuilder");
 
-class TeamsBot extends ActivityHandler {
+class TeamsBot extends TeamsActivityHandler {
   constructor(conversationState) {
     super();
 
@@ -13,7 +14,7 @@ class TeamsBot extends ActivityHandler {
       const userId = context.activity.from.id;
       const userName = context.activity.from.name;
 
-      await this.ensureUserExists(userId, userName);
+      await this.ensureUserExists(context, userId, userName);
 
       const state = await this.quizState.get(context, {
         inQuiz: false,
@@ -142,7 +143,7 @@ class TeamsBot extends ActivityHandler {
     this.onMembersAdded(async (context, next) => {
       for (const member of context.activity.membersAdded) {
         if (member.id !== context.activity.recipient.id) {
-          await this.ensureUserExists(member.id, member.name);
+          await this.ensureUserExists(context, member.id, member.name);
           const welcomeText = `👋 **Welcome to AI Champions Bot, ${member.name}!**\n\nType **start quiz** to see what I can do!\n\n`;
           await context.sendActivity(welcomeText);
         }
@@ -151,15 +152,21 @@ class TeamsBot extends ActivityHandler {
     });
   }
 
-  async ensureUserExists(userId, userName) {
+  async ensureUserExists(context, userId, userName) {
     try {
       const { resource: user } = await containers.users.item(userId, userId).read();
       if (!user) {
+        const member = await TeamsInfo.getMember(context, userId);
+        // This is a placeholder. In a real app, you would use the Microsoft Graph API
+        // to get the user's full profile information.
+        const designation = member.userPrincipalName.includes("manager") ? "Manager" : "Engineer";
+        const teamId = designation === "Manager" ? "Management" : "Engineering";
+
         await containers.users.items.create({
           id: userId,
           name: userName,
-          designation: "Default Designation", // Placeholder
-          teamId: "Default Team", // Placeholder
+          designation: designation,
+          teamId: teamId,
           xp: 0,
           level: 1,
           badges: [],
@@ -167,11 +174,17 @@ class TeamsBot extends ActivityHandler {
       }
     } catch (error) {
       if (error.code === 404) {
+        const member = await TeamsInfo.getMember(context, userId);
+        // This is a placeholder. In a real app, you would use the Microsoft Graph API
+        // to get the user's full profile information.
+        const designation = member.userPrincipalName.includes("manager") ? "Manager" : "Engineer";
+        const teamId = designation === "Manager" ? "Management" : "Engineering";
+        
         await containers.users.items.create({
           id: userId,
           name: userName,
-          designation: "Default Designation", // Placeholder
-          teamId: "Default Team", // Placeholder
+          designation: designation,
+          teamId: teamId,
           xp: 0,
           level: 1,
           badges: [],
