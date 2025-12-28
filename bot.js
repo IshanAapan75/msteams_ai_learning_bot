@@ -2,6 +2,8 @@ const { TeamsActivityHandler, CardFactory } = require("botbuilder");
 const { containers } = require("./lib/cosmos");
 const { TeamsInfo } = require("botbuilder");
 
+const appUrl = process.env.APP_URL || "http://localhost:3000";
+
 class TeamsBot extends TeamsActivityHandler {
   constructor(conversationState) {
     super();
@@ -25,7 +27,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       if (text === "start quiz") {
         state.inQuiz = true;
-        const res = await fetch("http://localhost:3000/api/quiz/assign", {
+        const res = await fetch(`${appUrl}/api/quiz/assign`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId }),
@@ -39,7 +41,7 @@ class TeamsBot extends TeamsActivityHandler {
         await this.sendQuestion(context, state);
       } else if (text === "/profile") {
         const res = await fetch(
-          `http://localhost:3000/api/user/profile?userId=${userId}`
+          `${appUrl}/api/user/profile?userId=${userId}`
         );
         const user = await res.json();
         const card = CardFactory.adaptiveCard({
@@ -65,7 +67,7 @@ class TeamsBot extends TeamsActivityHandler {
         });
         await context.sendActivity({ attachments: [card] });
       } else if (text === "/leaderboard") {
-        const res = await fetch("http://localhost:3000/api/leaderboard");
+        const res = await fetch(`${appUrl}/api/leaderboard`);
         const { teams, users } = await res.json();
         const card = CardFactory.adaptiveCard({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -109,7 +111,7 @@ class TeamsBot extends TeamsActivityHandler {
         const answer = context.activity.value ? context.activity.value.answer : text;
         const question = state.quiz.questions[state.questionIndex];
 
-        const res = await fetch("http://localhost:3000/api/quiz/answer", {
+        const res = await fetch(`${appUrl}/api/quiz/answer`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId, questionId: question.id, answer }),
