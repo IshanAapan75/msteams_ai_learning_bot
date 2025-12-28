@@ -1,13 +1,4 @@
-const { CosmosClient } = require("@azure/cosmos");
-
-// Initialize Cosmos Client
-const client = new CosmosClient({
-    endpoint: process.env.COSMOS_ENDPOINT,
-    key: process.env.COSMOS_KEY
-});
-
-const database = client.database(process.env.COSMOS_DATABASE || "ChatBotDB");
-const container = database.container(process.env.COSMOS_CONTAINER || "Quiz");
+const { containers } = require("./lib/cosmos");
 
 // Save question to database
 async function saveQuestion(conversationId, userId, userName, question, answer) {
@@ -24,7 +15,7 @@ async function saveQuestion(conversationId, userId, userName, question, answer) 
             time: new Date().toLocaleTimeString()
         };
 
-        const { resource: result } = await container.items.create(document);
+        const { resource: result } = await containers.conversations.items.create(document);
         console.log('✅ Question saved to database:', result.id);
         return result;
     } catch (error) {
@@ -46,7 +37,7 @@ async function getQuestions(conversationId) {
             ]
         };
 
-        const { resources: results } = await container.items
+        const { resources: results } = await containers.conversations.items
             .query(querySpec)
             .fetchAll();
 
@@ -65,7 +56,7 @@ async function getTotalQuestions() {
             query: "SELECT VALUE COUNT(1) FROM c"
         };
 
-        const { resources: results } = await container.items
+        const { resources: results } = await containers.conversations.items
             .query(querySpec)
             .fetchAll();
 

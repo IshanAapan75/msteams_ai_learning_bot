@@ -16,13 +16,21 @@ export async function POST(req) {
     await containers.users.item(userId, userId).read();
 
   const xpResult = addXp(user.xp || 0, earnedXp);
-  const badges = assignBadges({ ...user, ...xpResult });
 
   await containers.users.item(userId, userId).replace({
     ...user,
     ...xpResult,
-    badges,
   });
+
+  const newBadges = await assignBadges({ ...user, ...xpResult });
+
+  if (correct && user.teamId) {
+    const { resource: team } = await containers.teams.item(user.teamId, user.teamId).read();
+    await containers.teams.item(user.teamId, user.teamId).replace({
+      ...team,
+      score: (team.score || 0) + earnedXp,
+    });
+  }
 
   await containers.responses.items.create({
     userId,
@@ -38,6 +46,6 @@ export async function POST(req) {
     earnedXp,
     totalXp: xpResult.xp,
     level: xpResult.level,
-    badges,
+    newBadges,
   });
 }

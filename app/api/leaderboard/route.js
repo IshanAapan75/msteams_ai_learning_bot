@@ -2,12 +2,22 @@
 import { containers } from "../../../lib/cosmos";
 
 export async function GET() {
-  const query = {
-    query: "SELECT c.teamId, SUM(c.xp) as totalXp FROM c GROUP BY c.teamId",
-  };
+  const { resources: teams } = await containers.teams.items
+    .query("SELECT * FROM c ORDER BY c.score DESC")
+    .fetchAll();
 
-  const { resources } =
-    await containers.users.items.query(query).fetchAll();
+  const { resources: users } = await containers.users.items
+    .query("SELECT * FROM c ORDER BY c.xp DESC")
+    .fetchAll();
 
-  return Response.json(resources);
+  return Response.json({
+    teams,
+    users: users.map((u) => ({
+      id: u.id,
+      name: u.name,
+      xp: u.xp,
+      level: u.level,
+      teamId: u.teamId,
+    })),
+  });
 }

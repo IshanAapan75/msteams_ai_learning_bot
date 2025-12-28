@@ -1,5 +1,5 @@
 const restify = require('restify');
-const { BotFrameworkAdapter } = require('botbuilder');
+const { BotFrameworkAdapter, ConversationState, MemoryStorage } = require('botbuilder');
 const { TeamsBot } = require('./bot');
 
 // Create HTTP server
@@ -25,10 +25,15 @@ const adapter = new BotFrameworkAdapter({
 adapter.onTurnError = async (context, error) => {
     console.error(`\n [onTurnError] unhandled error: ${error}`);
     await context.sendActivity('The bot encountered an error.');
+    await conversationState.delete(context);
 };
 
+// State management
+const memoryStorage = new MemoryStorage();
+const conversationState = new ConversationState(memoryStorage);
+
 // Create bot
-const bot = new TeamsBot();
+const bot = new TeamsBot(conversationState);
 
 // Listen for incoming requests - CRITICAL!
 server.post('/api/messages', async (req, res) => {
