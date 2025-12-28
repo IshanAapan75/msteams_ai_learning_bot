@@ -1,4 +1,4 @@
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../lib/cosmos";
 import React from "react";
 
 async function getBadgeData(badgeId) {

@@ -12,14 +12,21 @@
       "static/chunks/fd9d1056-749e5812300142af.js",
       "static/chunks/117-e5476d4bdcce692a.js",
       "static/chunks/main-app-9442cc25934d1aed.js",
-      "static/chunks/app/layout-c54d42dbfd504823.js"
+      "static/chunks/app/layout-4d2f00ad62641395.js"
+    ],
+    "/badge/[badgeId]/page": [
+      "static/chunks/webpack-100b9e646d9c912e.js",
+      "static/chunks/fd9d1056-749e5812300142af.js",
+      "static/chunks/117-e5476d4bdcce692a.js",
+      "static/chunks/main-app-9442cc25934d1aed.js",
+      "static/chunks/app/badge/[badgeId]/page-2ab802a390a2832a.js"
     ],
     "/page": [
       "static/chunks/webpack-100b9e646d9c912e.js",
       "static/chunks/fd9d1056-749e5812300142af.js",
       "static/chunks/117-e5476d4bdcce692a.js",
       "static/chunks/main-app-9442cc25934d1aed.js",
-      "static/chunks/app/page-0619e73f7895cdcd.js"
+      "static/chunks/app/page-69aba7be5bf5290c.js"
     ]
   }
 }

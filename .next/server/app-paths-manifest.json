@@ -1,7 +1,10 @@
 {
   "/_not-found/page": "app/_not-found/page.js",
+  "/api/badges/share/route": "app/api/badges/share/route.js",
   "/api/leaderboard/route": "app/api/leaderboard/route.js",
+  "/api/quiz/answer/route": "app/api/quiz/answer/route.js",
+  "/api/user/profile/route": "app/api/user/profile/route.js",
+  "/badge/[badgeId]/page": "app/badge/[badgeId]/page.js",
   "/api/quiz/assign/route": "app/api/quiz/assign/route.js",
-  "/page": "app/page.js",
-  "/api/quiz/answer/route": "app/api/quiz/answer/route.js"
+  "/page": "app/page.js"
 }
