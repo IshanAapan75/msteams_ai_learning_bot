@@ -32,6 +32,13 @@ class TeamsBot extends TeamsActivityHandler {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId }),
         });
+
+        if (!res.ok) {
+          await context.sendActivity("It looks like there are no quizzes available for you at the moment.");
+          state.inQuiz = false;
+          return;
+        }
+
         const { quiz } = await res.json();
         state.quiz = quiz;
         state.questionIndex = 0;

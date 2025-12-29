@@ -14,5 +14,9 @@ export async function POST(req) {
   const { resources } =
     await containers.quizzes.items.query(query).fetchAll();
 
+  if (resources.length === 0) {
+    return new Response("No quiz found for your designation", { status: 404 });
+  }
+
   return Response.json({ quiz: resources[0] });
 }
