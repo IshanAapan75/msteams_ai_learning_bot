@@ -9,8 +9,9 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
     const server = express();
-    server.use(express.json());
-    server.use(express.urlencoded({ extended: true }));
+    // Removed global body-parsing middleware:
+    // server.use(express.json());
+    // server.use(express.urlencoded({ extended: true }));
 
     const port = process.env.PORT || 3978;
     server.listen(port, () => {

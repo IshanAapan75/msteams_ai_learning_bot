@@ -165,11 +165,14 @@ class TeamsBot extends TeamsActivityHandler {
     try {
       const { resource: user } = await containers.users.item(userId, userId).read();
       if (!user) {
-        const member = await TeamsInfo.getMember(context, userId);
-        // This is a placeholder. In a real app, you would use the Microsoft Graph API
-        // to get the user's full profile information.
-        const designation = member.userPrincipalName.includes("manager") ? "Manager" : "Engineer";
-        const teamId = designation === "Manager" ? "Management" : "Engineering";
+        const member = (await TeamsInfo.getMember(context, userId)) || {};
+        let designation = "Engineer"; // Default designation
+        let teamId = "Engineering"; // Default teamId
+
+        if (member && member.userPrincipalName) {
+          designation = member.userPrincipalName.includes("manager") ? "Manager" : "Engineer";
+          teamId = designation === "Manager" ? "Management" : "Engineering";
+        }
 
         await containers.users.items.create({
           id: userId,
@@ -183,11 +186,14 @@ class TeamsBot extends TeamsActivityHandler {
       }
     } catch (error) {
       if (error.code === 404) {
-        const member = await TeamsInfo.getMember(context, userId);
-        // This is a placeholder. In a real app, you would use the Microsoft Graph API
-        // to get the user's full profile information.
-        const designation = member.userPrincipalName.includes("manager") ? "Manager" : "Engineer";
-        const teamId = designation === "Manager" ? "Management" : "Engineering";
+        const member = (await TeamsInfo.getMember(context, userId)) || {};
+        let designation = "Engineer"; // Default designation
+        let teamId = "Engineering"; // Default teamId
+        
+        if (member && member.userPrincipalName) {
+          designation = member.userPrincipalName.includes("manager") ? "Manager" : "Engineer";
+          teamId = designation === "Manager" ? "Management" : "Engineering";
+        }
         
         await containers.users.items.create({
           id: userId,
