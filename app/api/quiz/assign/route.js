@@ -21,6 +21,24 @@ export async function POST(req) {
     const assignedQuiz = quizzes[0];
     console.log(`[API/quiz/assign] Assigned quiz: ${assignedQuiz.id} to user: ${userId}`);
 
+    // If quizzes store question IDs (strings), populate full question objects
+    if (
+      Array.isArray(assignedQuiz.questions) &&
+      assignedQuiz.questions.length > 0 &&
+      typeof assignedQuiz.questions[0] === "string"
+    ) {
+      const populated = [];
+      for (const qid of assignedQuiz.questions) {
+        try {
+          const { resource: q } = await containers.questions.item(qid, qid).read();
+          if (q) populated.push(q);
+        } catch (err) {
+          console.warn(`[API/quiz/assign] Could not load question ${qid}: ${err.message}`);
+        }
+      }
+      assignedQuiz.questions = populated;
+    }
+
     return NextResponse.json({ quiz: assignedQuiz });
 
   } catch (error) {

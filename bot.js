@@ -45,7 +45,18 @@ class TeamsBot extends TeamsActivityHandler {
         state.score = 0;
 
         await context.sendActivity(`Starting quiz: ${quiz.title}`);
-        await this.sendQuestion(context, state);
+        if (!quiz.questions || !Array.isArray(quiz.questions) || quiz.questions.length === 0) {
+          await context.sendActivity("This quiz doesn't contain any questions. Try another quiz later.");
+          state.inQuiz = false;
+        } else {
+          try {
+            await this.sendQuestion(context, state);
+          } catch (err) {
+            console.error('Error sending question:', err);
+            await context.sendActivity('Sorry, I could not start the quiz due to an internal error.');
+            state.inQuiz = false;
+          }
+        }
       } else if (text === "/profile") {
         const res = await fetch(
           `${appUrl}/api/user/profile?userId=${userId}`
