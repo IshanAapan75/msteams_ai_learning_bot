@@ -12,7 +12,7 @@ export async function POST(req) {
     // Fetch all available quizzes. Requirement states "any valid one is fine".
     const { resources: quizzes } = await containers.quizzes.items.readAll().fetchAll();
 
-    if (quizzes.length === 0) {
+    if (!quizzes || quizzes.length === 0) {
       console.warn(`[API/quiz/assign] No quizzes found in Cosmos DB.`);
       return NextResponse.json({ error: "No quizzes available" }, { status: 404 });
     }
@@ -21,23 +21,32 @@ export async function POST(req) {
     const assignedQuiz = quizzes[0];
     console.log(`[API/quiz/assign] Assigned quiz: ${assignedQuiz.id} to user: ${userId}`);
 
-    // If quizzes store question IDs (strings), populate full question objects
-    if (
-      Array.isArray(assignedQuiz.questions) &&
-      assignedQuiz.questions.length > 0 &&
-      typeof assignedQuiz.questions[0] === "string"
-    ) {
-      const populated = [];
+    // If assignedQuiz has a questions array with string IDs, populate full question objects
+    if (assignedQuiz && Array.isArray(assignedQuiz.questions) && assignedQuiz.questions.length > 0) {
+      const populatedQuestions = [];
       for (const qid of assignedQuiz.questions) {
-        try {
-          const { resource: q } = await containers.questions.item(qid, qid).read();
-          if (q) populated.push(q);
-        } catch (err) {
-          console.warn(`[API/quiz/assign] Could not load question ${qid}: ${err.message}`);
+        if (typeof qid === 'string') { // Only fetch if it's an ID
+          try {
+            const { resource: q } = await containers.questions.item(qid, qid).read();
+            if (q) {
+              populatedQuestions.push(q);
+            } else {
+              console.warn(`[API/quiz/assign] Question with ID ${qid} not found.`);
+            }
+          } catch (err) {
+            console.error(`[API/quiz/assign] Error loading question ${qid}: ${err.message}`);
+          }
+        } else if (typeof qid === 'object' && qid !== null) { // Already a question object
+            populatedQuestions.push(qid);
         }
       }
-      assignedQuiz.questions = populated;
+      assignedQuiz.questions = populatedQuestions;
+    } else {
+        console.warn(`[API/quiz/assign] Quiz ${assignedQuiz.id} has no questions array or it's empty.`);
+        // Optionally handle quizzes with no questions gracefully, e.g., return a 404
+        return NextResponse.json({ error: "Assigned quiz has no questions" }, { status: 404 });
     }
+
 
     return NextResponse.json({ quiz: assignedQuiz });
 

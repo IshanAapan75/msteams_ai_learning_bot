@@ -222,6 +222,12 @@ class TeamsBot extends TeamsActivityHandler {
   }
 
   async sendQuestion(context, state) {
+    if (!state.quiz || !state.quiz.questions || !state.quiz.questions[state.questionIndex] || !state.quiz.questions[state.questionIndex].text) {
+      console.error('Error: Quiz or question data is missing or invalid in sendQuestion.');
+      await context.sendActivity('Error: Could not retrieve question details. Please contact support.');
+      state.inQuiz = false; // Reset quiz state
+      return;
+    }
     const question = state.quiz.questions[state.questionIndex];
     const card = CardFactory.adaptiveCard({
       $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
