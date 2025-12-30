@@ -161,30 +161,109 @@ class TeamsBot extends TeamsActivityHandler {
         });
         await context.sendActivity({ attachments: [card] });
       } else if (text === "/learning") {
-        const res = await fetch(`${appUrl}/api/learning`);
-        const learningModules = await res.json();
-        const card = CardFactory.adaptiveCard({
-          $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          version: "1.3",
-          type: "AdaptiveCard",
-          body: [
-            {
-              type: "TextBlock",
-              text: "Available Learning Modules",
-              weight: "bolder",
-              size: "medium",
-            },
-            ...learningModules.map((module) => ({
-              type: "FactSet",
-              facts: [
-                { title: "Topic", value: module.topic },
-                { title: "Description", value: module.description },
-                { title: "Level", value: module.level },
-              ],
+        try {
+          const res = await fetch(`${appUrl}/api/learning`);
+
+          if (!res.ok) {
+            const errorPayload = await res.json().catch(() => null);
+            await context.sendActivity(
+              errorPayload?.error || "We couldn't load the learning catalog right now."
+            );
+            return;
+          }
+
+          const learningModules = await res.json();
+
+          if (!learningModules || learningModules.length === 0) {
+            await context.sendActivity("No learning modules are available yet. Please check back later.");
+            return;
+          }
+
+          const moduleListBlocks = learningModules.map((module, index) => ({
+            type: "TextBlock",
+            text: `${index + 1}. ${module.topic} (${module.level || "Any level"})`,
+            wrap: true,
+            spacing: "small",
+          }));
+
+          const card = CardFactory.adaptiveCard({
+            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            version: "1.3",
+            type: "AdaptiveCard",
+            body: [
+              {
+                type: "TextBlock",
+                text: "Available Learning Modules",
+                weight: "bolder",
+                size: "medium",
+              },
+              {
+                type: "TextBlock",
+                text: "Tap a topic to read the summary. Opening a topic will mark it as completed for you.",
+                wrap: true,
+                spacing: "small",
+              },
+              ...moduleListBlocks,
+            ],
+            actions: learningModules.map((module) => ({
+              type: "Action.Submit",
+              title: module.topic,
+              data: {
+                action: "view_learning",
+                learningId: module.id,
+                topic: module.topic,
+                description: module.description || "No description provided.",
+                details: module.details || "Detailed guidance will be added soon.",
+                level: module.level || "Any",
+              },
             })),
-          ],
-        });
-        await context.sendActivity({ attachments: [card] });
+          });
+
+          await context.sendActivity({ attachments: [card] });
+        } catch (err) {
+          console.error("[Bot] Failed to load learning modules", err);
+          await context.sendActivity("We couldn't load the learning catalog right now. Please try again later.");
+        }
+      } else if (context.activity.value?.action === "view_learning") {
+        const { learningId, topic, description, details, level } = context.activity.value;
+
+        if (!learningId) {
+          await context.sendActivity("We couldn't identify which module you selected. Please try again.");
+          return;
+        }
+
+        const summary =
+          `📘 **${topic || "Learning Module"} (${level || "Any"})**\n\n` +
+          `${description || "No description available."}\n\n` +
+          `${details || "Detailed guidance will be added soon."}`;
+
+        await context.sendActivity(summary);
+
+        try {
+          const patchRes = await fetch(`${appUrl}/api/learning`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              learningId,
+              userId,
+              status: "completed",
+            }),
+          });
+
+          if (!patchRes.ok) {
+            const errorPayload = await patchRes.json().catch(() => null);
+            await context.sendActivity(
+              errorPayload?.error || "We showed the content but couldn't mark it as completed."
+            );
+          } else {
+            await context.sendActivity("✅ Marked as completed! You're ready for the quizzes.");
+          }
+        } catch (error) {
+          console.error("[Bot] Failed to update learning completion", error);
+          await context.sendActivity(
+            "We showed the content but couldn't update your completion status. Please try again later."
+          );
+        }
       } else if (state.inQuiz) {
         const answer = context.activity.value ? context.activity.value.answer : text;
         const question = state.currentQuiz.questions[state.questionIndex];
