@@ -29,13 +29,19 @@ class TeamsBot extends TeamsActivityHandler {
         currentResponses: [],
         aiLearningId: null,
         aiLearningStatus: "not started",
+        aiLearningQuizzes: [],
       });
 
       if (text === "start quiz") {
         const res = await fetch(`${appUrl}/api/quiz/assign`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, fetchAll: true }),
+          body: JSON.stringify({
+            userId,
+            fetchAll: true,
+            aiLearningId: state.aiLearningId,
+            aiLearningQuizzes: state.aiLearningQuizzes,
+          }),
         });
 
         if (!res.ok) {
@@ -59,7 +65,11 @@ class TeamsBot extends TeamsActivityHandler {
           return;
         }
 
-        const { quizzes } = await res.json();
+        const {
+          quizzes,
+          aiLearningId: assignedAiLearningId,
+          aiLearningStatus: updatedLearningStatus,
+        } = await res.json();
         
         if (!quizzes || quizzes.length === 0) {
           await context.sendActivity("No quizzes found.");
@@ -74,7 +84,8 @@ class TeamsBot extends TeamsActivityHandler {
         state.totalScore = 0;
         state.currentQuizScore = 0;
         state.currentResponses = [];
-        state.aiLearningStatus = "completed";
+        state.aiLearningStatus = updatedLearningStatus || "completed";
+        state.aiLearningId = assignedAiLearningId || state.aiLearningId;
 
         await context.sendActivity(
           `🎯 Starting Quiz Session!\n\nTotal Quizzes: ${quizzes.length}\n\n**Quiz 1/${quizzes.length}: ${state.currentQuiz.title}**`
@@ -215,6 +226,7 @@ class TeamsBot extends TeamsActivityHandler {
                 description: module.description || "No description provided.",
                 details: module.details || "Detailed guidance will be added soon.",
                 level: module.level || "Any",
+                quizzes: Array.isArray(module.quizzes) ? module.quizzes : [],
               },
             })),
           });
@@ -225,7 +237,8 @@ class TeamsBot extends TeamsActivityHandler {
           await context.sendActivity("We couldn't load the learning catalog right now. Please try again later.");
         }
       } else if (context.activity.value?.action === "view_learning") {
-        const { learningId, topic, description, details, level } = context.activity.value;
+        const { learningId, topic, description, details, level, quizzes = [] } =
+          context.activity.value || {};
 
         if (!learningId) {
           await context.sendActivity("We couldn't identify which module you selected. Please try again.");
@@ -239,6 +252,10 @@ class TeamsBot extends TeamsActivityHandler {
 
         await context.sendActivity(summary);
 
+        state.aiLearningId = learningId;
+        state.aiLearningStatus = "completed";
+        state.aiLearningQuizzes = Array.isArray(quizzes) ? quizzes : [];
+
         try {
           const patchRes = await fetch(`${appUrl}/api/learning`, {
             method: "PATCH",
@@ -247,6 +264,7 @@ class TeamsBot extends TeamsActivityHandler {
               learningId,
               userId,
               status: "completed",
+              assignedTo: userId,
             }),
           });
 
@@ -256,7 +274,22 @@ class TeamsBot extends TeamsActivityHandler {
               errorPayload?.error || "We showed the content but couldn't mark it as completed."
             );
           } else {
-            await context.sendActivity("✅ Marked as completed! You're ready for the quizzes.");
+            await context.sendActivity(
+              "✅ Marked as completed! You're ready for the related quizzes when you type 'start quiz'."
+            );
+
+            try {
+              const { resource: userRecord } = await containers.users.item(userId, userId).read();
+              if (userRecord) {
+                await containers.users.items.upsert({
+                  ...userRecord,
+                  lastCompletedLearningId: learningId,
+                  lastCompletedLearningAt: new Date().toISOString(),
+                });
+              }
+            } catch (userUpdateError) {
+              console.error("[Bot] Failed to record learning completion on user doc", userUpdateError);
+            }
           }
         } catch (error) {
           console.error("[Bot] Failed to update learning completion", error);

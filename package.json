@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node -r dotenv/config index.js dotenv_config_path=./env/.env.dev",
     "dev": "next dev",
-    "build": "next build"
+    "build": "next build",
+    "db:seed": "node seed.js"
   },
   "dependencies": {
     "@azure/cosmos": "^4.0.0",

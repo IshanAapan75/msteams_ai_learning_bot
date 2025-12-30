@@ -1,6 +1,6 @@
 const { CosmosClient } = require("@azure/cosmos");
 
-const REQUIRED_ENV_VARS = ["COSMOS_ENDPOINT", "COSMOS_KEY", "COSMOS_DATABASE"];
+const REQUIRED_ENV_VARS = ["COSMOS_ENDPOINT", "COSMOS_KEY", "ChatBotDB"];
 
 function assertEnv() {
   const missing = REQUIRED_ENV_VARS.filter((name) => !process.env[name]);
@@ -31,21 +31,30 @@ const seedData = {
     {
       id: "response-user-1",
       userId: "user-1",
-      aiLearningId: "learning-module-1",
-      aiLearningStatus: "completed",
-      attempts: [
+      learnings: [
         {
-          quizId: "quiz-1",
-          responses: [
-            { questionId: "q1", answer: "A", correct: true, correctAnswer: "A", xpValue: 5 },
-            { questionId: "q2", answer: "B", correct: false, correctAnswer: "C", xpValue: 5 },
+          learningId: "learning-module-1",
+          status: "completed",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          attempts: [
+            {
+              quizId: "quiz-1",
+              status: "completed",
+              responses: [
+                { questionId: "q1", answer: "A", correct: true, correctAnswer: "A", xpValue: 5 },
+                { questionId: "q2", answer: "B", correct: false, correctAnswer: "C", xpValue: 5 },
+              ],
+              score: { correct: 1, total: 2 },
+              result: "needs_review",
+              xpEarned: 10,
+              submittedAt: new Date().toISOString(),
+              completedAt: new Date().toISOString(),
+            },
           ],
-          score: { correct: 1, total: 2 },
-          result: "needs_review",
-          xpEarned: 10,
-          submittedAt: new Date().toISOString(),
         },
       ],
+      updatedAt: new Date().toISOString(),
     },
   ],
   teams: [

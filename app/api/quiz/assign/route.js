@@ -1,152 +1,139 @@
-// import { NextResponse } from "next/server";
-// import { containers } from "../../../../lib/cosmos";
-
-// // Use the Node.js runtime for this API route
-// export const runtime = 'nodejs';
-
-// export async function POST(req) {
-//   try {
-//     const { userId } = await req.json();
-//     console.log(`[API/quiz/assign] Received request for userId: ${userId}`);
-
-//     // Fetch all available quizzes. Requirement states "any valid one is fine".
-//     const { resources: quizzes } = await containers.quizzes.items.readAll().fetchAll();
-
-//     if (!quizzes || quizzes.length === 0) {
-//       console.warn(`[API/quiz/assign] No quizzes found in Cosmos DB.`);
-//       return NextResponse.json({ error: "No quizzes available" }, { status: 404 });
-//     }
-
-//     // Return the first available quiz
-//     const assignedQuiz = quizzes[0];
-//     console.log(`[API/quiz/assign] Assigned quiz: ${assignedQuiz.id} to user: ${userId}`);
-
-//     // If assignedQuiz has a questions array with string IDs, populate full question objects
-//     if (assignedQuiz && Array.isArray(assignedQuiz.questions) && assignedQuiz.questions.length > 0) {
-//       const populatedQuestions = [];
-//       for (const qid of assignedQuiz.questions) {
-//         if (typeof qid === 'string') { // Only fetch if it's an ID
-//           try {
-//             const { resource: q } = await containers.questions.item(qid, qid).read();
-//             if (q) {
-//               populatedQuestions.push(q);
-//             } else {
-//               console.warn(`[API/quiz/assign] Question with ID ${qid} not found.`);
-//             }
-//           } catch (err) {
-//             console.error(`[API/quiz/assign] Error loading question ${qid}: ${err.message}`);
-//           }
-//         } else if (typeof qid === 'object' && qid !== null) { // Already a question object
-//             populatedQuestions.push(qid);
-//         }
-//       }
-//       assignedQuiz.questions = populatedQuestions;
-//     } else {
-//         console.warn(`[API/quiz/assign] Quiz ${assignedQuiz.id} has no questions array or it's empty.`);
-//         // Optionally handle quizzes with no questions gracefully, e.g., return a 404
-//         return NextResponse.json({ error: "Assigned quiz has no questions" }, { status: 404 });
-//     }
-
-
-//     return NextResponse.json({ quiz: assignedQuiz });
-
-//   } catch (error) {
-//     console.error(`[API/quiz/assign] Error processing request: ${error.message}`);
-//     return NextResponse.json({ error: "Internal Server Error", details: error.message }, { status: 500 });
-//   }
-// }
-
-
-
-
-
-
-
-
-
-
-
-
 import { NextResponse } from "next/server";
 import { containers } from "../../../../lib/cosmos";
+import {
+  fetchResponseProgress,
+  getLearningEntry,
+  getPendingAttempts,
+  upsertLearningEntry,
+} from "../../../../lib/learningProgress";
 
 export const runtime = 'nodejs';
 export const dynamic = "force-dynamic";
 
+async function populateQuestions(quiz) {
+  if (!quiz || !Array.isArray(quiz.questions) || quiz.questions.length === 0) {
+    return quiz;
+  }
+
+  const populatedQuestions = [];
+
+  for (const qid of quiz.questions) {
+    if (typeof qid === "string") {
+      try {
+        const { resource: question } = await containers.questions.item(qid, qid).read();
+        if (question) {
+          populatedQuestions.push(question);
+          console.log(`[API/quiz/assign] Loaded question: ${question.id} for quiz: ${quiz.title}`);
+        }
+      } catch (err) {
+        console.error(`[API/quiz/assign] Error loading question ${qid}: ${err.message}`);
+      }
+    } else if (qid && typeof qid === "object") {
+      populatedQuestions.push(qid);
+    }
+  }
+
+  return { ...quiz, questions: populatedQuestions };
+}
+
 export async function POST(req) {
   try {
-    const { userId, fetchAll } = await req.json();
-    console.log(`[API/quiz/assign] Request for userId: ${userId}, fetchAll: ${fetchAll}`);
+    const { userId, fetchAll, aiLearningId, aiLearningQuizzes } = await req.json();
+    console.log(
+      `[API/quiz/assign] Request for userId: ${userId}, fetchAll: ${fetchAll}, aiLearningId: ${aiLearningId}`
+    );
 
     if (!userId) {
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
 
-    let aiLearningStatus = "not started";
-    let responseDoc = null;
-    try {
-      const { resource } = await containers.responses.item(userId, userId).read();
-      responseDoc = resource;
-      aiLearningStatus = resource?.aiLearningStatus || "not started";
-    } catch (statusError) {
-      if (statusError.code !== 404) {
-        console.error("[API/quiz/assign] Unable to read responses doc", statusError);
-        return NextResponse.json(
-          { error: "Unable to verify AI learning completion" },
-          { status: 500 }
-        );
+    const progressDoc = await fetchResponseProgress(userId);
+
+    const { resources: learningRecords } = await containers.ai_learning.items
+      .query({
+        query: "SELECT * FROM c WHERE c.userId = @userId",
+        parameters: [{ name: "@userId", value: userId }],
+      })
+      .fetchAll();
+
+    const manualQuizList = Array.isArray(aiLearningQuizzes) ? aiLearningQuizzes.filter(Boolean) : [];
+    let effectiveLearningId = aiLearningId;
+
+    if (!effectiveLearningId && Array.isArray(progressDoc.learnings)) {
+      const lastCompleted = progressDoc.learnings.find((entry) => entry.status === "completed");
+      if (lastCompleted) {
+        effectiveLearningId = lastCompleted.learningId;
       }
     }
 
-    const ensureResponseDoc = async (updates = {}) => {
-      const baseDoc = {
-        id: userId,
+    let targetLearning = effectiveLearningId
+      ? getLearningEntry(progressDoc, effectiveLearningId)
+      : null;
+
+    if (!targetLearning && effectiveLearningId) {
+      await upsertLearningEntry({
         userId,
-        aiLearningId: updates.aiLearningId ?? responseDoc?.aiLearningId ?? null,
-        aiLearningStatus: updates.aiLearningStatus ?? responseDoc?.aiLearningStatus ?? "not started",
-        attempts: responseDoc?.attempts ?? [],
-      };
-      const merged = { ...responseDoc, ...baseDoc, ...updates };
-      await containers.responses.items.upsert(merged);
-      responseDoc = merged;
-      aiLearningStatus = merged.aiLearningStatus;
-    };
+        learningId: effectiveLearningId,
+        status: "completed",
+        quizIds: manualQuizList,
+      });
+      targetLearning = await (async () => {
+        const reloaded = await fetchResponseProgress(userId);
+        return getLearningEntry(reloaded, effectiveLearningId);
+      })();
+    }
 
-    if (aiLearningStatus !== "completed") {
-      try {
-        const { resources: learningRecords } = await containers.ai_learning.items
-          .query({
-            query: "SELECT TOP 1 * FROM c WHERE c.userId = @userId AND LOWER(c.status) = 'completed'",
-            parameters: [{ name: "@userId", value: userId }],
-          })
-          .fetchAll();
+    if (!targetLearning || targetLearning.status?.toLowerCase() !== "completed") {
+      const completedModule = learningRecords.find(
+        (module) => module.id === effectiveLearningId || module.status?.toLowerCase() === "completed"
+      );
 
-        const completedModule = learningRecords?.[0];
-
-        if (completedModule) {
-          await ensureResponseDoc({
-            aiLearningId: completedModule.id ?? responseDoc?.aiLearningId ?? null,
-            aiLearningStatus: "completed",
-          });
-        } else {
-          return NextResponse.json(
-            {
-              error: "Complete the AI learning module before taking quizzes.",
-              aiLearningStatus,
-            },
-            { status: 403 }
-          );
-        }
-      } catch (learningError) {
-        console.error("[API/quiz/assign] Failed to validate AI learning status", learningError);
-        return NextResponse.json(
-          { error: "Unable to verify AI learning completion" },
-          { status: 500 }
-        );
+      if (completedModule) {
+        await upsertLearningEntry({
+          userId,
+          learningId: completedModule.id,
+          status: completedModule.status || "completed",
+          quizIds: Array.isArray(completedModule.quizzes) ? completedModule.quizzes : [],
+        });
+        const reloaded = await fetchResponseProgress(userId);
+        targetLearning = getLearningEntry(reloaded, completedModule.id);
+        effectiveLearningId = completedModule.id;
       }
     }
 
-    // Fetch ALL quizzes
+    if (!targetLearning || targetLearning.status?.toLowerCase() !== "completed") {
+      return NextResponse.json(
+        {
+          error: "Complete the AI learning module before taking quizzes.",
+          aiLearningStatus: targetLearning?.status || "not started",
+        },
+        { status: 403 }
+      );
+    }
+
+    let targetQuizIds = manualQuizList;
+
+    if (!targetQuizIds || targetQuizIds.length === 0) {
+      const pendingAttempts = getPendingAttempts(targetLearning);
+      if (pendingAttempts.length > 0) {
+        targetQuizIds = pendingAttempts.map((attempt) => attempt.quizId).filter(Boolean);
+      }
+    }
+
+    if ((!targetQuizIds || targetQuizIds.length === 0) && effectiveLearningId) {
+      const module = learningRecords.find((item) => item.id === effectiveLearningId);
+      if (module && Array.isArray(module.quizzes)) {
+        targetQuizIds = module.quizzes.filter(Boolean);
+        await upsertLearningEntry({
+          userId,
+          learningId: effectiveLearningId,
+          status: targetLearning.status,
+          quizIds: targetQuizIds,
+        });
+      }
+    }
+
+    // Fetch quizzes
     const { resources: quizzes } = await containers.quizzes.items.readAll().fetchAll();
 
     if (!quizzes || quizzes.length === 0) {
@@ -156,41 +143,49 @@ export async function POST(req) {
 
     console.log(`[API/quiz/assign] Found ${quizzes.length} quizzes`);
 
-    // Populate questions for ALL quizzes
-    const populatedQuizzes = [];
-    
-    for (const quiz of quizzes) {
-      const populatedQuiz = { ...quiz };
-      
-      if (Array.isArray(quiz.questions) && quiz.questions.length > 0) {
-        const populatedQuestions = [];
-        
-        for (const qid of quiz.questions) {
-          if (typeof qid === 'string') {
-            try {
-              const { resource: q } = await containers.questions.item(qid, qid).read();
-              if (q) {
-                populatedQuestions.push(q);
-                console.log(`[API/quiz/assign] Loaded question: ${q.id} for quiz: ${quiz.title}`);
-              }
-            } catch (err) {
-              console.error(`[API/quiz/assign] Error loading question ${qid}: ${err.message}`);
-            }
-          } else if (typeof qid === 'object' && qid !== null) {
-            populatedQuestions.push(qid);
-          }
-        }
-        
-        populatedQuiz.questions = populatedQuestions;
-        console.log(`[API/quiz/assign] Quiz "${quiz.title}" has ${populatedQuestions.length} questions`);
-      }
-      
-      populatedQuizzes.push(populatedQuiz);
+    let filteredQuizzes = quizzes;
+    if (Array.isArray(targetQuizIds) && targetQuizIds.length > 0) {
+      filteredQuizzes = quizzes.filter((quiz) => targetQuizIds.includes(quiz.id));
+      console.log(
+        `[API/quiz/assign] Filtered quizzes by AI learning ${effectiveLearningId}. Result count: ${filteredQuizzes.length}`
+      );
     }
 
-    console.log(`[API/quiz/assign] Returning ${populatedQuizzes.length} quizzes with questions`);
-    return NextResponse.json({ quizzes: populatedQuizzes });
+    if (!filteredQuizzes || filteredQuizzes.length === 0) {
+      return NextResponse.json(
+        {
+          error: "No quizzes are linked to the completed learning module.",
+          aiLearningId: effectiveLearningId,
+        },
+        { status: 404 }
+      );
+    }
 
+    const populatedQuizzes = [];
+    for (const quiz of filteredQuizzes) {
+      const populatedQuiz = await populateQuestions(quiz);
+      populatedQuizzes.push(populatedQuiz);
+      if (!fetchAll) {
+        break;
+      }
+    }
+
+    console.log(
+      `[API/quiz/assign] Returning ${populatedQuizzes.length} quizzes with questions for learning ${effectiveLearningId}`
+    );
+
+    await upsertLearningEntry({
+      userId,
+      learningId: effectiveLearningId,
+      status: "completed",
+      quizIds: targetQuizIds,
+    });
+
+    return NextResponse.json({
+      quizzes: populatedQuizzes,
+      aiLearningId: effectiveLearningId,
+      aiLearningStatus: targetLearning.status || "completed",
+    });
   } catch (error) {
     console.error(`[API/quiz/assign] Error processing request: ${error.message}`);
     return NextResponse.json({ error: "Internal Server Error", details: error.message }, { status: 500 });

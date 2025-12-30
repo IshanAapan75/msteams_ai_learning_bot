@@ -2,6 +2,7 @@ import { containers } from "../../../../lib/cosmos";
 import { addXp } from "../../../../lib/xp";
 import { assignBadges } from "../../../../lib/badges";
 import { awardXpAction, syncRewardBadges } from "../../../../lib/rewards";
+import { markQuizAttempt } from "../../../../lib/learningProgress";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -125,44 +126,27 @@ export async function POST(req) {
       submittedAt: new Date().toISOString(),
     };
 
-    let responseDoc;
-    try {
-      const { resource } = await containers.responses.item(userId, userId).read();
-      responseDoc = resource;
-    } catch (error) {
-      if (error.code === 404) {
-        responseDoc = {
-          id: userId,
-          userId,
-          aiLearningId: aiLearningId || null,
-          aiLearningStatus: aiLearningStatus || "not started",
-          attempts: [],
-        };
-      } else {
-        console.error("[API/quiz/answer] Failed to load response doc:", error);
-        return NextResponse.json(
-          { error: "Failed to load user response history" },
-          { status: 500 }
-        );
-      }
+    if (!aiLearningId) {
+      return NextResponse.json(
+        { error: "aiLearningId is required to record quiz attempts" },
+        { status: 400 }
+      );
     }
 
-    if (aiLearningId) {
-      responseDoc.aiLearningId = aiLearningId;
-    } else if (responseDoc.aiLearningId === undefined) {
-      responseDoc.aiLearningId = null;
-    }
-
-    if (aiLearningStatus) {
-      responseDoc.aiLearningStatus = aiLearningStatus;
-    } else if (responseDoc.aiLearningStatus === undefined) {
-      responseDoc.aiLearningStatus = "not started";
-    }
-
-    responseDoc.attempts = responseDoc.attempts || [];
-    responseDoc.attempts.push(submission);
-
-    await containers.responses.items.upsert(responseDoc);
+    const attemptUpdate = await markQuizAttempt({
+      userId,
+      learningId: aiLearningId,
+      quizId,
+      update: {
+        status: "completed",
+        responses: evaluatedResponses,
+        score,
+        result,
+        xpEarned: totalXpEarned,
+        submittedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      },
+    });
 
     let rewardRecord = rewardResult.reward;
 
@@ -178,8 +162,8 @@ export async function POST(req) {
       totalXp: xpResult.xp,
       level: xpResult.level,
       badges,
-      aiLearningId: responseDoc.aiLearningId,
-      aiLearningStatus: responseDoc.aiLearningStatus,
+      aiLearningId,
+      aiLearningStatus: attemptUpdate?.entry?.status || aiLearningStatus || "completed",
       streak: rewardResult.streak,
       streakMultiplier: rewardResult.multiplier,
       rewards: rewardRecord,

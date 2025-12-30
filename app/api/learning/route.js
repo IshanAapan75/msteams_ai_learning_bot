@@ -1,39 +1,21 @@
 import { containers } from "../../../lib/cosmos";
 import { NextResponse } from "next/server";
 import { awardXpAction } from "../../../lib/rewards";
+import { upsertLearningEntry } from "../../../lib/learningProgress";
 
 export const dynamic = "force-dynamic";
 
-async function upsertResponseStatus({ userId, aiLearningId, status }) {
-  if (!userId) {
+async function upsertResponseStatus({ userId, aiLearningId, status, quizzes = [] }) {
+  if (!userId || !aiLearningId) {
     return;
   }
 
-  const normalizedStatus = status || "not started";
-
-  let existing;
-  try {
-    const { resource } = await containers.responses.item(userId, userId).read();
-    existing = resource;
-  } catch (error) {
-    if (error.code !== 404) {
-      throw error;
-    }
-  }
-
-  const responseDoc = {
-    id: userId,
+  await upsertLearningEntry({
     userId,
-    aiLearningId: aiLearningId ?? existing?.aiLearningId ?? null,
-    aiLearningStatus: normalizedStatus,
-    attempts: existing?.attempts ?? [],
-    ...existing,
-  };
-
-  responseDoc.aiLearningId = aiLearningId ?? responseDoc.aiLearningId;
-  responseDoc.aiLearningStatus = normalizedStatus;
-
-  await containers.responses.items.upsert(responseDoc);
+    learningId: aiLearningId,
+    status,
+    quizIds: quizzes,
+  });
 }
 
 export async function POST(req) {
@@ -54,6 +36,7 @@ export async function POST(req) {
       userId: learningModule.userId,
       aiLearningId: createdModule.id,
       status: "completed",
+      quizzes: Array.isArray(learningModule.quizzes) ? learningModule.quizzes : [],
     });
 
     await awardXpAction({
@@ -103,6 +86,7 @@ export async function PATCH(req) {
         userId,
         aiLearningId: learningId,
         status,
+        quizzes: Array.isArray(updated.quizzes) ? updated.quizzes : existing?.quizzes || [],
       });
 
       if (status.toLowerCase() === "completed") {
