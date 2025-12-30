@@ -1,6 +1,8 @@
 // import { containers } from "@/lib/cosmos";
 import { containers } from "../../../lib/cosmos";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const { resources: teams } = await containers.teams.items
     .query("SELECT * FROM c ORDER BY c.score DESC")

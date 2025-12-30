@@ -1,5 +1,7 @@
 import { containers } from "../../../../lib/cosmos";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("userId");

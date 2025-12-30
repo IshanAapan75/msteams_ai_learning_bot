@@ -71,11 +71,80 @@ import { NextResponse } from "next/server";
 import { containers } from "../../../../lib/cosmos";
 
 export const runtime = 'nodejs';
+export const dynamic = "force-dynamic";
 
 export async function POST(req) {
   try {
     const { userId, fetchAll } = await req.json();
     console.log(`[API/quiz/assign] Request for userId: ${userId}, fetchAll: ${fetchAll}`);
+
+    if (!userId) {
+      return NextResponse.json({ error: "userId is required" }, { status: 400 });
+    }
+
+    let aiLearningStatus = "not started";
+    let responseDoc = null;
+    try {
+      const { resource } = await containers.responses.item(userId, userId).read();
+      responseDoc = resource;
+      aiLearningStatus = resource?.aiLearningStatus || "not started";
+    } catch (statusError) {
+      if (statusError.code !== 404) {
+        console.error("[API/quiz/assign] Unable to read responses doc", statusError);
+        return NextResponse.json(
+          { error: "Unable to verify AI learning completion" },
+          { status: 500 }
+        );
+      }
+    }
+
+    const ensureResponseDoc = async (updates = {}) => {
+      const baseDoc = {
+        id: userId,
+        userId,
+        aiLearningId: updates.aiLearningId ?? responseDoc?.aiLearningId ?? null,
+        aiLearningStatus: updates.aiLearningStatus ?? responseDoc?.aiLearningStatus ?? "not started",
+        attempts: responseDoc?.attempts ?? [],
+      };
+      const merged = { ...responseDoc, ...baseDoc, ...updates };
+      await containers.responses.items.upsert(merged);
+      responseDoc = merged;
+      aiLearningStatus = merged.aiLearningStatus;
+    };
+
+    if (aiLearningStatus !== "completed") {
+      try {
+        const { resources: learningRecords } = await containers.ai_learning.items
+          .query({
+            query: "SELECT TOP 1 * FROM c WHERE c.userId = @userId AND LOWER(c.status) = 'completed'",
+            parameters: [{ name: "@userId", value: userId }],
+          })
+          .fetchAll();
+
+        const completedModule = learningRecords?.[0];
+
+        if (completedModule) {
+          await ensureResponseDoc({
+            aiLearningId: completedModule.id ?? responseDoc?.aiLearningId ?? null,
+            aiLearningStatus: "completed",
+          });
+        } else {
+          return NextResponse.json(
+            {
+              error: "Complete the AI learning module before taking quizzes.",
+              aiLearningStatus,
+            },
+            { status: 403 }
+          );
+        }
+      } catch (learningError) {
+        console.error("[API/quiz/assign] Failed to validate AI learning status", learningError);
+        return NextResponse.json(
+          { error: "Unable to verify AI learning completion" },
+          { status: 500 }
+        );
+      }
+    }
 
     // Fetch ALL quizzes
     const { resources: quizzes } = await containers.quizzes.items.readAll().fetchAll();
