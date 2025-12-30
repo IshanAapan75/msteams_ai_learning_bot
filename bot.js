@@ -485,9 +485,16 @@ class TeamsBot extends TeamsActivityHandler {
     
     const question = state.currentQuiz.questions[state.questionIndex];
     
-    if (!question.text || !question.options) {
-      console.error('Error: Question text or options missing.');
+    const questionText = question.text || question.question || question.title;
+    const rawOptions = question.options || question.choices || question.answers || [];
+    const normalizedOptions = Array.isArray(rawOptions)
+      ? rawOptions.filter(Boolean)
+      : Object.values(rawOptions || {}).filter(Boolean);
+
+    if (!questionText || normalizedOptions.length === 0) {
+      console.error('Error: Question text or options missing.', question);
       await context.sendActivity('Error: Invalid question format.');
+      state.inQuiz = false;
       return;
     }
 
@@ -505,12 +512,12 @@ class TeamsBot extends TeamsActivityHandler {
         },
         {
           type: "TextBlock",
-          text: question.text,
+          text: questionText,
           wrap: true,
           size: "medium"
         },
       ],
-      actions: question.options.map((option) => ({
+      actions: normalizedOptions.map((option) => ({
         type: "Action.Submit",
         title: option,
         data: {
