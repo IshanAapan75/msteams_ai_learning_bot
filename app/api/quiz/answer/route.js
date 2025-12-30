@@ -107,6 +107,12 @@ export async function POST(req) {
       badges,
     });
 
+    const totalXpEarned = evaluatedResponses.reduce((sum, entry) => {
+      if (!entry) return sum;
+      const xpValue = typeof entry.xpValue === "number" ? entry.xpValue : 0;
+      return entry.correct ? sum + xpValue : sum;
+    }, 0);
+
     const submission = {
       quizId,
       responses: evaluatedResponses,
