@@ -1,6 +1,7 @@
 const { TeamsActivityHandler, CardFactory } = require("botbuilder");
 const { containers } = require("./lib/cosmos");
 const { TeamsInfo } = require("botbuilder");
+const { upsertUserProfile } = require("./lib/users");
 
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
@@ -428,43 +429,39 @@ class TeamsBot extends TeamsActivityHandler {
 
   async ensureUserExists(context, userId, userName) {
     try {
-      const { resource: user } = await containers.users.item(userId, userId).read();
-      if (!user) {
-        const member = (await TeamsInfo.getMember(context, userId)) || {};
-        let designation = "Engineer";
-        let teamId = "Engineering";
+      const member = await TeamsInfo.getMember(context, userId);
+      const profile = {
+        id: userId,
+        name: userName || `${member?.givenName || ""} ${member?.surname || ""}`.trim(),
+        email: (member?.email || member?.userPrincipalName || "").toLowerCase() || null,
+        designation: member?.jobTitle || null,
+        teamId: member?.tenantId || null,
+        lastSeenAt: new Date().toISOString(),
+      };
 
-        if (member && member.userPrincipalName) {
-          designation = member.userPrincipalName.includes("manager") ? "Manager" : "Engineer";
-          teamId = designation === "Manager" ? "Management" : "Engineering";
-        }
+      const doc = await upsertUserProfile(profile);
 
-        await containers.users.items.create({
-          id: userId,
-          name: userName,
-          designation: designation,
-          teamId: teamId,
-          xp: 0,
-          level: 1,
-          badges: [],
-        });
+      if (!doc.xp) {
+        doc.xp = 0;
       }
+      if (!doc.level) {
+        doc.level = 1;
+      }
+      if (!Array.isArray(doc.badges)) {
+        doc.badges = [];
+      }
+      await containers.users.items.upsert(doc);
     } catch (error) {
       if (error.code === 404) {
-        const member = (await TeamsInfo.getMember(context, userId)) || {};
-        let designation = "Engineer";
-        let teamId = "Engineering";
-        
-        if (member && member.userPrincipalName) {
-          designation = member.userPrincipalName.includes("manager") ? "Manager" : "Engineer";
-          teamId = designation === "Manager" ? "Management" : "Engineering";
-        }
-        
-        await containers.users.items.create({
+        const fallbackProfile = {
           id: userId,
           name: userName,
-          designation: designation,
-          teamId: teamId,
+          designation: "Member",
+          teamId: null,
+          lastSeenAt: new Date().toISOString(),
+        };
+        await containers.users.items.upsert({
+          ...fallbackProfile,
           xp: 0,
           level: 1,
           badges: [],
