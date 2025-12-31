@@ -1,4 +1,4 @@
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../../lib/cosmos.js";
 
 export const dynamic = "force-dynamic";
 
@@ -18,3 +18,4 @@ export async function GET(req) {
 
   return Response.json(user);
 }
+

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../../lib/cosmos.js";
 import {
   fetchResponseProgress,
   getLearningEntry,
   getPendingAttempts,
   upsertLearningEntry,
 } from "../../../../lib/learningProgress";
+import { syncLearningAssignment } from "../../../../lib/learningPlan.js";
+import { ensureUserHasProfile } from "../../../../lib/users.js";
 
 export const runtime = 'nodejs';
 export const dynamic = "force-dynamic";
@@ -47,6 +49,7 @@ export async function POST(req) {
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
 
+    await ensureUserHasProfile(userId);
     const progressDoc = await fetchResponseProgress(userId);
 
     const { resources: learningRecords } = await containers.ai_learning.items
@@ -102,10 +105,12 @@ export async function POST(req) {
     }
 
     if (!targetLearning || targetLearning.status?.toLowerCase() !== "completed") {
+      const assignment = await syncLearningAssignment(userId);
       return NextResponse.json(
         {
           error: "Complete the AI learning module before taking quizzes.",
-          aiLearningStatus: targetLearning?.status || "not started",
+          aiLearningStatus: targetLearning?.status || assignment.status || "not started",
+          assignment,
         },
         { status: 403 }
       );
@@ -191,3 +196,4 @@ export async function POST(req) {
     return NextResponse.json({ error: "Internal Server Error", details: error.message }, { status: 500 });
   }
 }
+

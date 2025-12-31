@@ -1,7 +1,9 @@
-import { containers } from "../../../lib/cosmos";
+import { containers } from "../../../lib/cosmos.js";
 import { NextResponse } from "next/server";
 import { awardXpAction } from "../../../lib/rewards";
+import { ensureUserHasProfile } from "../../../lib/users.js";
 import { upsertLearningEntry } from "../../../lib/learningProgress";
+import { recordSurveyAndAssignNext, syncLearningAssignment } from "../../../lib/learningPlan.js";
 
 export const dynamic = "force-dynamic";
 
@@ -55,10 +57,20 @@ export async function POST(req) {
 
 export async function PATCH(req) {
   const payload = await req.json();
-  const { learningId, userId, status, ...rest } = payload;
+  const { learningId, userId, status, survey, ...rest } = payload;
 
   if (!learningId) {
     return NextResponse.json({ error: "learningId is required" }, { status: 400 });
+  }
+
+  if (survey && userId) {
+    try {
+      const result = await recordSurveyAndAssignNext({ userId, learningId, survey });
+      return NextResponse.json(result);
+    } catch (error) {
+      console.error("[API/learning] Failed to record survey", error);
+      return NextResponse.json({ error: "Failed to save survey" }, { status: 500 });
+    }
   }
 
   try {
@@ -99,6 +111,7 @@ export async function PATCH(req) {
             },
           },
         });
+        await syncLearningAssignment(userId, true);
       }
     }
 
@@ -109,7 +122,23 @@ export async function PATCH(req) {
   }
 }
 
-export async function GET() {
-  const { resources: learningModules } = await containers.ai_learning.items.readAll().fetchAll();
-  return NextResponse.json(learningModules);
+export async function GET(req) {
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get("userId");
+  const forceAssignment = searchParams.get("sync") === "1";
+
+  if (!userId) {
+    const { resources: learningModules } = await containers.ai_learning.items.readAll().fetchAll();
+    return NextResponse.json(learningModules);
+  }
+
+  try {
+    await ensureUserHasProfile(userId);
+    const assignment = await syncLearningAssignment(userId, forceAssignment);
+    return NextResponse.json(assignment);
+  } catch (error) {
+    console.error("[API/learning] Failed to fetch assignment", error);
+    return NextResponse.json({ error: "Failed to load assignment" }, { status: 500 });
+  }
 }
+

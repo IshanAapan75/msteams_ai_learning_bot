@@ -1,354 +1,457 @@
 const { TeamsActivityHandler, CardFactory } = require("botbuilder");
-const { containers } = require("./lib/cosmos");
 const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
+const { syncLearningAssignment } = require("./lib/learningPlan.js");
 
 const appUrl = process.env.APP_URL || "http://localhost:3000";
+
+const httpFetch = (...args) =>
+  typeof fetch === "function"
+    ? fetch(...args)
+    : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
+
+function buildLearningSummaryCard(assignment) {
+  if (!assignment?.module) {
+    return null;
+  }
+
+  const lines = [
+    {
+      type: "TextBlock",
+      text: `📘 **${assignment.module.topic || assignment.module.title} (${assignment.module.level || "Any"})**`,
+      wrap: true,
+      weight: "bolder",
+      size: "medium",
+    },
+  ];
+
+  if (assignment.module.description) {
+    lines.push({
+      type: "TextBlock",
+      text: assignment.module.description,
+      wrap: true,
+    });
+  }
+
+  if (assignment.module.details) {
+    lines.push({
+      type: "TextBlock",
+      text: assignment.module.details,
+      wrap: true,
+      spacing: "small",
+    });
+  }
+
+  const statusFacts = [];
+  statusFacts.push({ title: "Status", value: assignment.status || "assigned" });
+  if (assignment.availableAt) {
+    statusFacts.push({ title: "Available", value: new Date(assignment.availableAt).toLocaleString() });
+  }
+  if (assignment.completedAt) {
+    statusFacts.push({ title: "Completed", value: new Date(assignment.completedAt).toLocaleString() });
+  }
+  if (assignment.quizPassedAt) {
+    statusFacts.push({ title: "Quiz", value: `Passed ${new Date(assignment.quizPassedAt).toLocaleString()}` });
+  }
+
+  const body = [
+    ...lines,
+    {
+      type: "FactSet",
+      facts: statusFacts,
+    },
+    {
+      type: "TextBlock",
+      text: assignment.canStart
+        ? "Ready to open now. Type **/learning** to read the module."
+        : "Module is locked for a short cooldown to build healthy habits. I’ll remind you when it’s ready!",
+      wrap: true,
+      spacing: "medium",
+    },
+  ];
+
+  const actions = [];
+  if (assignment.canStart) {
+    actions.push({
+      type: "Action.Submit",
+      title: "Mark Learning Complete",
+      data: {
+        action: "complete_learning",
+        learningId: assignment.learningId,
+      },
+    });
+  }
+
+  return CardFactory.adaptiveCard({
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    version: "1.4",
+    type: "AdaptiveCard",
+    body,
+    actions,
+  });
+}
+
+function buildSurveyCard(learningId) {
+  return CardFactory.adaptiveCard({
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    version: "1.4",
+    type: "AdaptiveCard",
+    body: [
+      {
+        type: "TextBlock",
+        text: "👏 Awesome! Tell us about your AI win",
+        weight: "bolder",
+        size: "medium",
+      },
+      {
+        type: "TextBlock",
+        text: "What did you use AI for? *",
+        weight: "bolder",
+        spacing: "medium",
+      },
+      {
+        type: "Input.ChoiceSet",
+        id: "actionType",
+        style: "expanded",
+        isMultiSelect: false,
+        choices: [
+          "Email drafting",
+          "Meeting summaries",
+          "Data analysis",
+          "Code review",
+          "Content creation",
+          "Research",
+          "Presentation prep",
+          "Other",
+        ].map((label) => ({ title: label, value: label })),
+      },
+      {
+        type: "TextBlock",
+        text: "How much time did you save? *",
+        weight: "bolder",
+        spacing: "medium",
+      },
+      {
+        type: "Input.ChoiceSet",
+        id: "timeSaved",
+        style: "expanded",
+        choices: [
+          "1-5 min",
+          "6-15 min",
+          "16-30 min",
+          "31-60 min",
+          "60+ min",
+        ].map((label) => ({ title: label, value: label })),
+      },
+      {
+        type: "TextBlock",
+        text: "Confidence in output quality *",
+        weight: "bolder",
+        spacing: "medium",
+      },
+      {
+        type: "Input.ChoiceSet",
+        id: "confidence",
+        style: "expanded",
+        choices: [
+          { title: "Low", value: "low" },
+          { title: "Medium", value: "medium" },
+          { title: "High", value: "high" },
+        ],
+      },
+      {
+        type: "TextBlock",
+        text: "Brief description (optional)",
+        spacing: "medium",
+      },
+      {
+        type: "Input.Text",
+        id: "notes",
+        isMultiline: true,
+        placeholder: "How did AI help you today?",
+      },
+    ],
+    actions: [
+      {
+        type: "Action.Submit",
+        title: "Submit",
+        data: {
+          action: "submit_survey",
+          learningId,
+        },
+      },
+    ],
+  });
+}
+
+async function fetchAssignment(userId) {
+  const res = await httpFetch(`${appUrl}/api/learning?userId=${encodeURIComponent(userId)}&sync=1`);
+  if (!res.ok) {
+    return null;
+  }
+  return res.json();
+}
 
 class TeamsBot extends TeamsActivityHandler {
   constructor(conversationState) {
     super();
-
     this.conversationState = conversationState;
     this.quizState = this.conversationState.createProperty("quizState");
 
     this.onMessage(async (context, next) => {
-      const text = context.activity.text ? context.activity.text.trim().toLowerCase() : "";
+      const text = context.activity.text?.trim().toLowerCase() || "";
       const userId = context.activity.from.id;
       const userName = context.activity.from.name;
 
       await this.ensureUserExists(context, userId, userName);
+      const assignment = await fetchAssignment(userId);
 
       const state = await this.quizState.get(context, {
         inQuiz: false,
-        allQuizzes: [],
-        currentQuizIndex: 0,
+        aiLearningId: assignment?.assignment?.learningId || null,
+        aiLearningStatus: assignment?.assignment?.status || "assigned",
+        aiLearningQuizzes: assignment?.assignment?.module?.quizzes || [],
         currentQuiz: null,
         questionIndex: 0,
-        totalScore: 0,
-        currentQuizScore: 0,
         currentResponses: [],
-        aiLearningId: null,
-        aiLearningStatus: "not started",
-        aiLearningQuizzes: [],
       });
 
       if (text === "start quiz") {
-        const res = await fetch(`${appUrl}/api/quiz/assign`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId,
-            fetchAll: true,
-            aiLearningId: state.aiLearningId,
-            aiLearningQuizzes: state.aiLearningQuizzes,
-          }),
-        });
-
-        if (!res.ok) {
-          try {
-            const errorPayload = await res.json();
-            if (res.status === 403 && errorPayload?.aiLearningStatus !== "completed") {
-              await context.sendActivity(
-                "Please complete the AI learning modules before attempting the quiz."
-              );
-            } else if (res.status === 404) {
-              await context.sendActivity("It looks like there are no quizzes available for you at the moment.");
-            } else {
-              await context.sendActivity(
-                errorPayload?.error || "We couldn't start a quiz session right now."
-              );
-            }
-          } catch (err) {
-            console.error("[Bot] Failed to parse quiz assign error", err);
-            await context.sendActivity("We couldn't start a quiz session right now.");
-          }
+        if (assignment?.assignment && assignment.assignment.status !== "completed") {
+          await context.sendActivity(
+            "Please finish the current learning module before starting the quiz. Type `/learning` to view it."
+          );
           return;
         }
 
-        const {
-          quizzes,
-          aiLearningId: assignedAiLearningId,
-          aiLearningStatus: updatedLearningStatus,
-        } = await res.json();
-        
-        if (!quizzes || quizzes.length === 0) {
-          await context.sendActivity("No quizzes found.");
+        const quizPayload = {
+          userId,
+          fetchAll: true,
+          aiLearningId: state.aiLearningId,
+          aiLearningQuizzes: state.aiLearningQuizzes,
+        };
+
+        const res = await httpFetch(`${appUrl}/api/quiz/assign`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(quizPayload),
+        });
+
+        if (!res.ok) {
+          const errorBody = await res.json().catch(() => ({}));
+          await context.sendActivity(errorBody.error || "I couldn't find a quiz right now.");
+          return;
+        }
+
+        const data = await res.json();
+        if (!data.quizzes?.length) {
+          await context.sendActivity("No quizzes are ready yet—please check back later.");
           return;
         }
 
         state.inQuiz = true;
-        state.allQuizzes = quizzes;
+        state.allQuizzes = data.quizzes;
         state.currentQuizIndex = 0;
-        state.currentQuiz = quizzes[0];
+        state.currentQuiz = data.quizzes[0];
         state.questionIndex = 0;
-        state.totalScore = 0;
-        state.currentQuizScore = 0;
         state.currentResponses = [];
-        state.aiLearningStatus = updatedLearningStatus || "completed";
-        state.aiLearningId = assignedAiLearningId || state.aiLearningId;
+        state.aiLearningId = data.aiLearningId;
+        state.aiLearningStatus = data.aiLearningStatus;
 
         await context.sendActivity(
-          `🎯 Starting Quiz Session!\n\nTotal Quizzes: ${quizzes.length}\n\n**Quiz 1/${quizzes.length}: ${state.currentQuiz.title}**`
+          `🎯 Starting quiz for ${state.currentQuiz.title}. Answer each question to proceed.`
         );
+        await this.sendQuestion(context, state);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
 
-        if (!state.currentQuiz.questions || state.currentQuiz.questions.length === 0) {
-          await context.sendActivity("This quiz doesn't contain any questions. Moving to next quiz...");
-          await this.moveToNextQuiz(context, state);
-        } else {
-          try {
-            await this.sendQuestion(context, state);
-          } catch (err) {
-            console.error('Error sending question:', err);
-            await context.sendActivity('Sorry, I could not start the quiz due to an internal error.');
-            state.inQuiz = false;
-          }
-        }
-      } else if (text === "/profile") {
-        const res = await fetch(
-          `${appUrl}/api/user/profile?userId=${userId}`
-        );
-        const user = await res.json();
-        const card = CardFactory.adaptiveCard({
-          $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          version: "1.3",
-          type: "AdaptiveCard",
-          body: [
-            {
-              type: "TextBlock",
-              text: `User Profile: ${user.name}`,
-              weight: "bolder",
-              size: "medium",
-            },
-            {
-              type: "FactSet",
-              facts: [
-                { title: "Level", value: user.level },
-                { title: "XP", value: user.xp },
-                { title: "Badges", value: (user.badges || []).join(", ") || "No badges yet" },
-              ],
-            },
-          ],
-        });
-        await context.sendActivity({ attachments: [card] });
-      } else if (text === "/leaderboard") {
-        const res = await fetch(`${appUrl}/api/leaderboard`);
-        const { teams, users } = await res.json();
-        const card = CardFactory.adaptiveCard({
-          $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          version: "1.3",
-          type: "AdaptiveCard",
-          body: [
-            {
-              type: "TextBlock",
-              text: "Leaderboard",
-              weight: "bolder",
-              size: "medium",
-            },
-            {
-              type: "TextBlock",
-              text: "Teams",
-              weight: "bolder",
-            },
-            {
-              type: "FactSet",
-              facts: teams.map((t) => ({
-                title: t.name,
-                value: t.score,
-              })),
-            },
-            {
-              type: "TextBlock",
-              text: "Users",
-              weight: "bolder",
-            },
-            {
-              type: "FactSet",
-              facts: users.map((u) => ({
-                title: u.name,
-                value: u.xp,
-              })),
-            },
-          ],
-        });
-        await context.sendActivity({ attachments: [card] });
-      } else if (text === "/learning") {
-        try {
-          const res = await fetch(`${appUrl}/api/learning`);
-
-          if (!res.ok) {
-            const errorPayload = await res.json().catch(() => null);
-            await context.sendActivity(
-              errorPayload?.error || "We couldn't load the learning catalog right now."
-            );
-            return;
-          }
-
-          const learningModules = await res.json();
-
-          if (!learningModules || learningModules.length === 0) {
-            await context.sendActivity("No learning modules are available yet. Please check back later.");
-            return;
-          }
-
-          const moduleListBlocks = learningModules.map((module, index) => ({
-            type: "TextBlock",
-            text: `${index + 1}. ${module.topic} (${module.level || "Any level"})`,
-            wrap: true,
-            spacing: "small",
-          }));
-
-          const card = CardFactory.adaptiveCard({
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-            version: "1.3",
-            type: "AdaptiveCard",
-            body: [
-              {
-                type: "TextBlock",
-                text: "Available Learning Modules",
-                weight: "bolder",
-                size: "medium",
-              },
-              {
-                type: "TextBlock",
-                text: "Tap a topic to read the summary. Opening a topic will mark it as completed for you.",
-                wrap: true,
-                spacing: "small",
-              },
-              ...moduleListBlocks,
-            ],
-            actions: learningModules.map((module) => ({
-              type: "Action.Submit",
-              title: module.topic,
-              data: {
-                action: "view_learning",
-                learningId: module.id,
-                topic: module.topic,
-                description: module.description || "No description provided.",
-                details: module.details || "Detailed guidance will be added soon.",
-                level: module.level || "Any",
-                quizzes: Array.isArray(module.quizzes) ? module.quizzes : [],
-              },
-            })),
-          });
-
-          await context.sendActivity({ attachments: [card] });
-        } catch (err) {
-          console.error("[Bot] Failed to load learning modules", err);
-          await context.sendActivity("We couldn't load the learning catalog right now. Please try again later.");
-        }
-      } else if (context.activity.value?.action === "view_learning") {
-        const { learningId, topic, description, details, level, quizzes = [] } =
-          context.activity.value || {};
-
-        if (!learningId) {
-          await context.sendActivity("We couldn't identify which module you selected. Please try again.");
+      if (text === "/learning") {
+        if (!assignment?.assignment) {
+          await context.sendActivity("I couldn't find any learning modules for you yet.");
           return;
         }
 
-        const summary =
-          `📘 **${topic || "Learning Module"} (${level || "Any"})**\n\n` +
-          `${description || "No description available."}\n\n` +
-          `${details || "Detailed guidance will be added soon."}`;
-
-        await context.sendActivity(summary);
-
-        state.aiLearningId = learningId;
-        state.aiLearningStatus = "completed";
-        state.aiLearningQuizzes = Array.isArray(quizzes) ? quizzes : [];
-
-        try {
-          const patchRes = await fetch(`${appUrl}/api/learning`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              learningId,
-              userId,
-              status: "completed",
-              assignedTo: userId,
-            }),
-          });
-
-          if (!patchRes.ok) {
-            const errorPayload = await patchRes.json().catch(() => null);
-            await context.sendActivity(
-              errorPayload?.error || "We showed the content but couldn't mark it as completed."
-            );
-          } else {
-            await context.sendActivity(
-              "✅ Marked as completed! You're ready for the related quizzes when you type 'start quiz'."
-            );
-
-            try {
-              const { resource: userRecord } = await containers.users.item(userId, userId).read();
-              if (userRecord) {
-                await containers.users.items.upsert({
-                  ...userRecord,
-                  lastCompletedLearningId: learningId,
-                  lastCompletedLearningAt: new Date().toISOString(),
-                });
-              }
-            } catch (userUpdateError) {
-              console.error("[Bot] Failed to record learning completion on user doc", userUpdateError);
-            }
-          }
-        } catch (error) {
-          console.error("[Bot] Failed to update learning completion", error);
-          await context.sendActivity(
-            "We showed the content but couldn't update your completion status. Please try again later."
-          );
+        const card = buildLearningSummaryCard(assignment.assignment);
+        if (card) {
+          await context.sendActivity({ attachments: [card] });
         }
-      } else if (state.inQuiz) {
-        const answer = context.activity.value ? context.activity.value.answer : text;
-        const question = state.currentQuiz.questions[state.questionIndex];
-
-        if (!state.currentResponses) {
-          state.currentResponses = [];
-        }
-
-        state.currentResponses.push({
-          questionId: question.id,
-          answer,
-          answeredAt: new Date().toISOString(),
-        });
-
-        state.questionIndex++;
-        
-        if (state.questionIndex < state.currentQuiz.questions.length) {
-          await this.sendQuestion(context, state);
-        } else {
-          await this.submitQuizAttempt(context, state, userId);
-          await this.moveToNextQuiz(context, state);
-        }
-      } else {
-        await context.sendActivity("Say 'start quiz' to begin, or /profile or /leaderboard to see stats.");
+        return;
       }
 
-      await this.conversationState.saveChanges(context);
-      await next();
+      if (context.activity.value?.action === "complete_learning") {
+        const { learningId } = context.activity.value;
+        await this.markLearningComplete(context, state, userId, learningId);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
+      if (context.activity.value?.action === "submit_survey") {
+        await this.submitSurvey(context, state, userId, context.activity.value);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
+      if (context.activity.value?.action === "view_learning") {
+        await context.sendActivity(
+          "This experience has been updated. Use `/learning` to view your assigned module."
+        );
+        return;
+      }
+
+      if (state.inQuiz) {
+        await this.handleQuizAnswer(context, state, userId, text);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
+      if (assignment?.assignment?.canStart === false) {
+        await context.sendActivity(
+          "You're doing great! Next module will unlock soon. I'll remind you when it's ready."
+        );
+      } else {
+        await context.sendActivity(
+          "Say `start quiz` when you're ready, or `/learning` to view your assignment."
+        );
+      }
     });
 
     this.onMembersAdded(async (context, next) => {
       for (const member of context.activity.membersAdded) {
         if (member.id !== context.activity.recipient.id) {
           await this.ensureUserExists(context, member.id, member.name);
-          const welcomeText = `👋 **Welcome to AI Champions Bot, ${member.name}!**\n\nType **start quiz** to see what I can do!\n\n`;
-          await context.sendActivity(welcomeText);
+          await context.sendActivity(
+            `👋 **Welcome to AI Champions Bot, ${member.name}!**\nI'll assign your first AI learning shortly.`
+          );
         }
       }
       await next();
     });
   }
 
+  async markLearningComplete(context, state, userId, learningId) {
+    if (!learningId) {
+      await context.sendActivity("I couldn't identify the learning module to complete.");
+      return;
+    }
+
+    try {
+      const res = await httpFetch(`${appUrl}/api/learning`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ learningId, userId, status: "completed" }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        await context.sendActivity(body.error || "Couldn't mark the learning as completed.");
+        return;
+      }
+
+      state.aiLearningId = learningId;
+      state.aiLearningStatus = "completed";
+
+      await context.sendActivity(
+        "Great! Let's jump into the quiz. Type `start quiz` when ready—passing it unlocks the next step."
+      );
+    } catch (error) {
+      console.error("[Bot] Failed to mark learning complete", error);
+      await context.sendActivity("Sorry, I couldn't update your learning status. Try again later.");
+    }
+  }
+
+  async submitSurvey(context, state, userId, payload) {
+    const { learningId } = payload;
+    if (!learningId) {
+      await context.sendActivity("Missing learning reference—please try again.");
+      return;
+    }
+
+    if (!payload.actionType || !payload.timeSaved || !payload.confidence) {
+      await context.sendActivity("Please answer all required questions before submitting.");
+      return;
+    }
+
+    const body = {
+      learningId,
+      userId,
+      survey: {
+        actionType: payload.actionType,
+        timeSaved: payload.timeSaved,
+        confidence: payload.confidence,
+        notes: payload.notes || null,
+      },
+    };
+
+    try {
+      const res = await httpFetch(`${appUrl}/api/learning`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        await context.sendActivity(data.error || "Couldn't save that. Please try again.");
+        return;
+      }
+
+      await context.sendActivity("🙌 Logged! I'll cue up your next learning once it's available.");
+      const assignment = await fetchAssignment(userId);
+      if (assignment?.assignment) {
+        const card = buildLearningSummaryCard(assignment.assignment);
+        if (card) {
+          await context.sendActivity({ attachments: [card] });
+        }
+      }
+    } catch (error) {
+      console.error("[Bot] Failed to submit survey", error);
+      await context.sendActivity("Something went wrong while saving that. Please try again.");
+    }
+  }
+
+  async handleQuizAnswer(context, state, userId, rawText) {
+    const answer = context.activity.value?.answer || rawText;
+    const question = state.currentQuiz.questions[state.questionIndex];
+
+    if (!question) {
+      state.inQuiz = false;
+      await context.sendActivity("I lost track of the question set. Let's start over soon.");
+      return;
+    }
+
+    state.currentResponses.push({
+      questionId: question.id,
+      answer,
+      answeredAt: new Date().toISOString(),
+    });
+
+    state.questionIndex += 1;
+
+    if (state.questionIndex < state.currentQuiz.questions.length) {
+      await this.sendQuestion(context, state);
+      return;
+    }
+
+    await this.submitQuizAttempt(context, state, userId);
+    await this.moveToNextQuiz(context, state);
+
+    if (!state.inQuiz) {
+      const card = buildSurveyCard(state.aiLearningId);
+      await context.sendActivity({
+        attachments: [card],
+      });
+    }
+  }
+
   async submitQuizAttempt(context, state, userId) {
-    if (!state.currentQuiz || !Array.isArray(state.currentResponses) || state.currentResponses.length === 0) {
-      await context.sendActivity("No responses recorded for this quiz. Skipping submission.");
+    if (!state.currentQuiz || !state.currentResponses.length) {
+      await context.sendActivity("No answers were recorded—quiz cancelled.");
       state.currentResponses = [];
       return;
     }
 
     try {
-      const res = await fetch(`${appUrl}/api/quiz/answer`, {
+      const res = await httpFetch(`${appUrl}/api/quiz/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -361,70 +464,45 @@ class TeamsBot extends TeamsActivityHandler {
       });
 
       if (!res.ok) {
-        console.error("[Bot] Failed to submit quiz attempt", res.statusText);
-        await context.sendActivity("We couldn't record your quiz attempt. Please try again later.");
+        const body = await res.json().catch(() => ({}));
+        console.error("[Bot] Quiz submission failed", body.error || res.statusText);
+        await context.sendActivity(body.error || "Couldn't submit that quiz. Try again later.");
       } else {
         const result = await res.json();
         await context.sendActivity(
-          `📊 Quiz "${state.currentQuiz.title}" submitted!\n` +
-          `Score: ${result.score.correct}/${result.score.total}\n` +
-          `Result: ${result.result}\n`
+          `📊 Quiz complete! Score: ${result.score.correct}/${result.score.total}. Result: ${result.result}.`
         );
       }
     } catch (error) {
       console.error("[Bot] Error submitting quiz attempt", error);
-      await context.sendActivity("An error occurred while recording your quiz attempt.");
+      await context.sendActivity("I hit an error while logging your answers. Please try again later.");
     }
 
     state.currentResponses = [];
-    state.currentQuizScore = 0;
   }
 
   async moveToNextQuiz(context, state) {
-    state.currentQuizIndex++;
-    
+    state.currentQuizIndex = (state.currentQuizIndex || 0) + 1;
+
     if (state.currentQuizIndex < state.allQuizzes.length) {
       state.currentQuiz = state.allQuizzes[state.currentQuizIndex];
       state.questionIndex = 0;
-      state.currentQuizScore = 0;
       state.currentResponses = [];
-
       await context.sendActivity(
-        `\n🎯 **Quiz ${state.currentQuizIndex + 1}/${state.allQuizzes.length}: ${state.currentQuiz.title}**\n`
+        `Next quiz: **${state.currentQuiz.title}**. Let's keep going!`
       );
-
-      if (!state.currentQuiz.questions || state.currentQuiz.questions.length === 0) {
-        await context.sendActivity("This quiz doesn't contain any questions. Moving to next quiz...");
-        await this.moveToNextQuiz(context, state);
-      } else {
-        try {
-          await this.sendQuestion(context, state);
-        } catch (err) {
-          console.error('Error sending question:', err);
-          await context.sendActivity('Sorry, could not load this quiz. Moving to next...');
-          await this.moveToNextQuiz(context, state);
-        }
-      }
-    } else {
-      let totalQuestions = 0;
-      state.allQuizzes.forEach(quiz => {
-        if (quiz.questions) totalQuestions += quiz.questions.length;
-      });
-
-      await context.sendActivity(
-        `🎉 **All Quizzes Completed!**\n\n` +
-        `Total Quizzes: ${state.allQuizzes.length}\n` +
-        `Total Questions: ${totalQuestions}\n` +
-        `Thanks for completing the session! 🎊`
-      );
-      
-      state.inQuiz = false;
-      state.allQuizzes = [];
-      state.currentQuiz = null;
-      state.currentResponses = [];
-      state.currentQuizIndex = 0;
-      state.questionIndex = 0;
+      await this.sendQuestion(context, state);
+      return;
     }
+
+    state.inQuiz = false;
+    state.currentQuiz = null;
+    state.allQuizzes = [];
+    state.questionIndex = 0;
+    state.currentResponses = [];
+    await context.sendActivity(
+      "🎉 All quizzes completed! Tell me about your AI win to unlock the next module."
+    );
   }
 
   async ensureUserExists(context, userId, userName) {
@@ -438,90 +516,59 @@ class TeamsBot extends TeamsActivityHandler {
         teamId: member?.tenantId || null,
         lastSeenAt: new Date().toISOString(),
       };
-
-      const doc = await upsertUserProfile(profile);
-
-      if (!doc.xp) {
-        doc.xp = 0;
-      }
-      if (!doc.level) {
-        doc.level = 1;
-      }
-      if (!Array.isArray(doc.badges)) {
-        doc.badges = [];
-      }
-      await containers.users.items.upsert(doc);
+      await upsertUserProfile(profile);
     } catch (error) {
-      if (error.code === 404) {
-        const fallbackProfile = {
-          id: userId,
-          name: userName,
-          designation: "Member",
-          teamId: null,
-          lastSeenAt: new Date().toISOString(),
-        };
-        await containers.users.items.upsert({
-          ...fallbackProfile,
-          xp: 0,
-          level: 1,
-          badges: [],
-        });
-      } else {
-        console.error("Error ensuring user exists:", error);
-      }
+      console.error("[Bot] Unable to load Teams profile", error);
+      await upsertUserProfile({
+        id: userId,
+        name: userName,
+        designation: "Member",
+        lastSeenAt: new Date().toISOString(),
+      });
     }
   }
 
   async sendQuestion(context, state) {
-    if (!state.currentQuiz || !state.currentQuiz.questions || !state.currentQuiz.questions[state.questionIndex]) {
-      console.error('Error: Quiz or question data is missing.');
-      await context.sendActivity('Error: Could not retrieve question details.');
+    const question = state.currentQuiz.questions[state.questionIndex];
+    if (!question) {
+      await context.sendActivity("I couldn't find that question—let's stop here.");
       state.inQuiz = false;
       return;
     }
-    
-    const question = state.currentQuiz.questions[state.questionIndex];
-    
-    const questionText = question.text || question.question || question.title;
-    const rawOptions = question.options || question.choices || question.answers || [];
-    const normalizedOptions = Array.isArray(rawOptions)
-      ? rawOptions.filter(Boolean)
-      : Object.values(rawOptions || {}).filter(Boolean);
 
-    if (!questionText || normalizedOptions.length === 0) {
-      console.error('Error: Question text or options missing.', question);
-      await context.sendActivity('Error: Invalid question format.');
+    const text = question.text || question.question || question.title;
+    const options = question.options || question.choices || question.answers || [];
+    const normalized = Array.isArray(options) ? options : Object.values(options);
+
+    if (!text || !normalized.length) {
+      await context.sendActivity("This question looks empty—skipping.");
       state.inQuiz = false;
       return;
     }
 
     const card = CardFactory.adaptiveCard({
       $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-      version: "1.3",
+      version: "1.4",
       type: "AdaptiveCard",
       body: [
         {
           type: "TextBlock",
           text: `Question ${state.questionIndex + 1}/${state.currentQuiz.questions.length}`,
           weight: "bolder",
-          size: "small",
-          color: "accent"
         },
         {
           type: "TextBlock",
-          text: questionText,
+          text,
           wrap: true,
-          size: "medium"
         },
       ],
-      actions: normalizedOptions.map((option) => ({
+      actions: normalized.map((option) => ({
         type: "Action.Submit",
         title: option,
-        data: {
-          answer: option,
-        },
+        data: { answer: option },
       })),
     });
+
     await context.sendActivity({ attachments: [card] });
   }
 }

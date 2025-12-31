@@ -8,7 +8,7 @@ import {
   getUserById,
   mergeDailyTotals,
 } from "../../../../lib/analytics";
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../../lib/cosmos.js";
 
 function parseRange(searchParams) {
   const value = Number(searchParams.get("range"));
@@ -81,3 +81,4 @@ export async function GET(req) {
     return NextResponse.json({ error: "Failed to load trend data" }, { status: 500 });
   }
 }
+

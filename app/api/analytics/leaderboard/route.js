@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../../lib/cosmos.js";
 
 function resolveType(searchParams) {
   const value = (searchParams.get("type") || "teams").toLowerCase();
@@ -58,3 +58,4 @@ export async function GET(req) {
     return NextResponse.json({ error: "Failed to load leaderboard" }, { status: 500 });
   }
 }
+

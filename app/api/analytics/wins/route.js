@@ -8,7 +8,7 @@ import {
   getUserById,
   isManager,
 } from "../../../../lib/analytics";
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../../lib/cosmos.js";
 
 function resolveScope(searchParams) {
   const scope = (searchParams.get("scope") || "personal").toLowerCase();
@@ -81,3 +81,4 @@ export async function GET(req) {
     return NextResponse.json({ error: "Failed to load win log" }, { status: 500 });
   }
 }
+

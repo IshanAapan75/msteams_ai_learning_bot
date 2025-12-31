@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../../lib/cosmos.js";
 import { buildTrendSeries, mergeDailyTotals } from "../../../../lib/analytics";
 
 function parseRange(searchParams) {
@@ -25,3 +25,4 @@ export async function GET(req) {
     return NextResponse.json({ error: "Failed to load org trend" }, { status: 500 });
   }
 }
+

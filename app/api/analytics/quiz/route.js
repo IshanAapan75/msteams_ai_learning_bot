@@ -8,7 +8,7 @@ import {
   isManager,
   summarizeQuizAttempts,
 } from "../../../../lib/analytics";
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../../lib/cosmos.js";
 
 function resolveScope(searchParams) {
   const scope = (searchParams.get("scope") || "personal").toLowerCase();
@@ -121,3 +121,4 @@ function extractAttemptsWithUser(doc, fallbackUserId) {
     return attempts.map((attempt) => ({ ...attempt, userId }));
   });
 }
+

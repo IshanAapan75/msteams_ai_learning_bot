@@ -1,8 +1,9 @@
-import { containers } from "../../../../lib/cosmos";
+import { containers } from "../../../../lib/cosmos.js";
 import { addXp } from "../../../../lib/xp";
 import { assignBadges } from "../../../../lib/badges";
 import { awardXpAction, syncRewardBadges } from "../../../../lib/rewards";
 import { markQuizAttempt } from "../../../../lib/learningProgress";
+import { recordQuizResult } from "../../../../lib/learningPlan.js";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -148,6 +149,8 @@ export async function POST(req) {
       },
     });
 
+    await recordQuizResult({ userId, learningId: aiLearningId, result });
+
     let rewardRecord = rewardResult.reward;
 
     if (badges?.length) {
@@ -176,3 +179,4 @@ export async function POST(req) {
     );
   }
 }
+
