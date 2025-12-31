@@ -66,7 +66,8 @@ export async function PATCH(req) {
   if (survey && userId) {
     try {
       const result = await recordSurveyAndAssignNext({ userId, learningId, survey });
-      return NextResponse.json(result);
+      const assignment = await syncLearningAssignment(userId, true);
+      return NextResponse.json({ ...result, assignment });
     } catch (error) {
       console.error("[API/learning] Failed to record survey", error);
       return NextResponse.json({ error: "Failed to save survey" }, { status: 500 });

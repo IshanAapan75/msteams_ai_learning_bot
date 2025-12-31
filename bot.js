@@ -10,6 +10,20 @@ const httpFetch = (...args) =>
     ? fetch(...args)
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
 
+const LANGUAGE_CHOICES = [
+  "English",
+  "Spanish",
+  "French",
+  "German",
+  "Japanese",
+  "Hindi",
+  "Portuguese",
+  "Chinese",
+  "Korean",
+  "Italian",
+  "Other",
+];
+
 function buildLearningSummaryCard(assignment) {
   if (!assignment?.module) {
     return null;
@@ -184,10 +198,66 @@ function buildSurveyCard(learningId) {
   });
 }
 
+function buildLanguagePreferenceCard() {
+  return CardFactory.adaptiveCard({
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    version: "1.4",
+    type: "AdaptiveCard",
+    body: [
+      {
+        type: "TextBlock",
+        text: "🌐 Choose your preferred language",
+        weight: "bolder",
+        size: "medium",
+      },
+      {
+        type: "TextBlock",
+        text: "We'll personalize your experience based on this selection.",
+        isSubtle: true,
+        wrap: true,
+        spacing: "small",
+      },
+      {
+        type: "Input.ChoiceSet",
+        id: "language",
+        style: "expanded",
+        choices: LANGUAGE_CHOICES.map((label) => ({ title: label, value: label })),
+      },
+    ],
+    actions: [
+      {
+        type: "Action.Submit",
+        title: "Save preference",
+        data: { action: "set_language" },
+      },
+    ],
+  });
+}
+
 async function fetchAssignment(userId) {
   const res = await httpFetch(`${appUrl}/api/learning?userId=${encodeURIComponent(userId)}&sync=1`);
   if (!res.ok) {
     return null;
+  }
+  return res.json();
+}
+
+async function getUserProfile(userId) {
+  const res = await httpFetch(`${appUrl}/api/user/profile?userId=${encodeURIComponent(userId)}`);
+  if (!res.ok) {
+    return null;
+  }
+  return res.json();
+}
+
+async function updateUserLanguage(userId, language) {
+  const res = await httpFetch(`${appUrl}/api/user/profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, language }),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to update language");
   }
   return res.json();
 }
@@ -208,13 +278,57 @@ class TeamsBot extends TeamsActivityHandler {
 
       const state = await this.quizState.get(context, {
         inQuiz: false,
-        aiLearningId: assignment?.assignment?.learningId || null,
-        aiLearningStatus: assignment?.assignment?.status || "assigned",
-        aiLearningQuizzes: assignment?.assignment?.module?.quizzes || [],
+        aiLearningId: null,
+        aiLearningStatus: "assigned",
+        aiLearningQuizzes: [],
         currentQuiz: null,
         questionIndex: 0,
         currentResponses: [],
+        language: null,
+        awaitingLanguage: false,
       });
+
+      const profile = await getUserProfile(userId);
+      if (profile) {
+        state.language = state.language || profile.language || null;
+        state.aiLearningId = state.aiLearningId || profile.lastCompletedLearningId || null;
+      }
+
+      if (context.activity.value?.action === "set_language") {
+        const selectedLanguage = context.activity.value.language;
+        if (!selectedLanguage) {
+          await context.sendActivity("Please choose a language from the list.");
+          return;
+        }
+        try {
+          await updateUserLanguage(userId, selectedLanguage);
+          state.language = selectedLanguage;
+          state.awaitingLanguage = false;
+          await context.sendActivity(`✅ Saved **${selectedLanguage}** as your language preference.`);
+        } catch (error) {
+          console.error("[Bot] Failed to update language", error);
+          await context.sendActivity("I couldn't save that preference. Please try again.");
+          return;
+        }
+      }
+
+      if (!state.language) {
+        if (!state.awaitingLanguage) {
+          const card = buildLanguagePreferenceCard();
+          await context.sendActivity({ attachments: [card] });
+          state.awaitingLanguage = true;
+        } else {
+          await context.sendActivity("Please pick a language to continue.");
+        }
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
+      state.awaitingLanguage = false;
+      const assignment = await fetchAssignment(userId);
+      state.aiLearningId = assignment?.assignment?.learningId || state.aiLearningId;
+      state.aiLearningStatus = assignment?.assignment?.status || state.aiLearningStatus;
+      state.aiLearningQuizzes = assignment?.assignment?.module?.quizzes || state.aiLearningQuizzes;
 
       if (text === "start quiz") {
         if (assignment?.assignment && assignment.assignment.status !== "completed") {
@@ -506,25 +620,31 @@ class TeamsBot extends TeamsActivityHandler {
   }
 
   async ensureUserExists(context, userId, userName) {
+    const fallback = {
+      id: userId,
+      name: userName,
+      designation: "Member",
+      lastSeenAt: new Date().toISOString(),
+    };
+
     try {
       const member = await TeamsInfo.getMember(context, userId);
+      const teams = await TeamsInfo.getTeamDetails(context, context.activity.channelData?.team?.id);
+
       const profile = {
         id: userId,
         name: userName || `${member?.givenName || ""} ${member?.surname || ""}`.trim(),
         email: (member?.email || member?.userPrincipalName || "").toLowerCase() || null,
-        designation: member?.jobTitle || null,
-        teamId: member?.tenantId || null,
+        designation: member?.jobTitle || member?.userRole || fallback.designation,
+        teamId: teams?.id || member?.tenantId || null,
+        teamName: teams?.name || teams?.displayName || null,
         lastSeenAt: new Date().toISOString(),
       };
+
       await upsertUserProfile(profile);
     } catch (error) {
       console.error("[Bot] Unable to load Teams profile", error);
-      await upsertUserProfile({
-        id: userId,
-        name: userName,
-        designation: "Member",
-        lastSeenAt: new Date().toISOString(),
-      });
+      await upsertUserProfile(fallback);
     }
   }
 

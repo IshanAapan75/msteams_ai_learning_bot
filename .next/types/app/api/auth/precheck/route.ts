@@ -1,8 +1,8 @@
-// File: C:\Users\princ\Downloads\msteams_ai_learning_bot\app\api\analytics\learning\route.js
-import * as entry from '../../../../../../app/api/analytics/learning/route.js'
+// File: C:\Users\princ\Downloads\msteams_ai_learning_bot\app\api\auth\precheck\route.js
+import * as entry from '../../../../../../app/api/auth/precheck/route.js'
 import type { NextRequest } from 'next/server.js'
 
-type TEntry = typeof import('../../../../../../app/api/analytics/learning/route.js')
+type TEntry = typeof import('../../../../../../app/api/auth/precheck/route.js')
 
 // Check that the entry is a valid entry
 checkFields<Diff<{

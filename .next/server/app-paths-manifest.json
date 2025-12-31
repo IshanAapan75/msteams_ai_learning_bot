@@ -1,8 +1,3 @@
 {
-  "/api/analytics/overview/route": "app/api/analytics/overview/route.js",
-  "/api/analytics/habits/route": "app/api/analytics/habits/route.js",
-  "/api/analytics/wins/route": "app/api/analytics/wins/route.js",
-  "/api/analytics/trend/route": "app/api/analytics/trend/route.js",
-  "/api/analytics/quiz/route": "app/api/analytics/quiz/route.js",
-  "/api/analytics/learning/route": "app/api/analytics/learning/route.js"
+  "/api/auth/precheck/route": "app/api/auth/precheck/route.js"
 }
