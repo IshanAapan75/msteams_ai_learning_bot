@@ -35,9 +35,16 @@ export async function GET(req) {
     }
 
     if (scope === "personal") {
-      const responses = await getResponsesByUserId(user.id);
-      const { summary, recentCompletions } = summarizeLearningEntries(responses?.learnings || []);
-      return NextResponse.json({ scope, summary, recentCompletions });
+      const userResponse = await getResponsesByUserId(user.id);
+      const learnings = userResponse?.learnings || [];
+      const { summary, recentCompletions } = summarizeLearningEntries(learnings);
+
+      return NextResponse.json({
+        scope,
+        summary,
+        recentCompletions,
+        detailedLearnings: learnings, // New field for detailed learning progression
+      });
     }
 
     if (scope === "team") {

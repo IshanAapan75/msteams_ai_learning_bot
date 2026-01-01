@@ -3,6 +3,8 @@ const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
 const { syncLearningAssignment } = require("./lib/learningPlan.js");
+const { OnBehalfOfUserCredential } = require("@microsoft/teamsfx");
+const { createMicrosoftGraphClientWithCredential } = require("@microsoft/teamsfx");
 
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
@@ -10,6 +12,48 @@ const httpFetch = (...args) =>
   typeof fetch === "function"
     ? fetch(...args)
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
+
+// Helper function to call MS Graph
+async function callMsGraph(context) {
+  const credential = new OnBehalfOfUserCredential(context.activity.from.aadObjectId);
+  const graphClient = createMicrosoftGraphClientWithCredential(credential, ".default");
+
+  try {
+    // Fetch user details from Graph API
+    const graphProfile = await graphClient.api("/me").get();
+    
+    // Fetch user's manager details
+    let manager = null;
+    if (graphProfile.managerId) { // Check if managerId exists
+      manager = await graphClient.api(`/users/${graphProfile.managerId}/manager`).get();
+    }
+
+    // Fetch user's direct reports
+    const directReports = await graphClient.api("/me/directReports").get();
+
+    // Fetch user's team details if available
+    let teamDetails = null;
+    try {
+        const joinedTeams = await graphClient.api("/me/joinedTeams").get();
+        if (joinedTeams && joinedTeams.value && joinedTeams.value.length > 0) {
+            // Assuming the first joined team is relevant, or further logic is needed to pick the right one
+            teamDetails = joinedTeams.value[0]; 
+        }
+    } catch (teamError) {
+        console.warn("[Graph] Could not fetch joined teams for user:", teamError.message);
+        // Continue if fetching teams fails, as it might be due to permissions or user not being in any teams
+    }
+
+
+    return { graphProfile, manager, directReports, teamDetails };
+  } catch (error) {
+    console.error("[Graph] Error calling Microsoft Graph API:", error);
+    if (error.statusCode === 401) {
+      console.warn("[Graph] Access token expired or invalid. User might need to re-authenticate.");
+    }
+    return null;
+  }
+}
 
 const LANGUAGE_CHOICES = [
   "English",
@@ -772,19 +816,31 @@ class TeamsBot extends TeamsActivityHandler {
         teams = await TeamsInfo.getTeamDetails(context);
       }
 
+      let graphData = null;
+      // Only call Graph API if aadObjectId is available for OnBehalfOfUserCredential
+      if (member?.aadObjectId) {
+        graphData = await callMsGraph(context);
+      } else {
+        console.warn("[Bot] member.aadObjectId not available, cannot call Graph API for user:", userId);
+      }
+
       const profile = {
         id: userId,
-        name: userName || `${member?.givenName || ""} ${member?.surname || ""}`.trim(),
-        email: (member?.email || member?.userPrincipalName || "").toLowerCase() || null,
-        designation: member?.jobTitle || member?.userRole || fallback.designation,
-        teamId: teams?.id || member?.tenantId || null,
-        teamName: teams?.name || teams?.displayName || null,
+        // Prioritize existing name, then Graph, then TeamsInfo, then fallback
+        name: userName || graphData?.graphProfile?.displayName || `${member?.givenName || ""} ${member?.surname || ""}`.trim(),
+        // Prioritize existing email, then Graph, then TeamsInfo
+        email: (member?.email || member?.userPrincipalName || graphData?.graphProfile?.mail || graphData?.graphProfile?.userPrincipalName || "").toLowerCase() || null,
+        // Prioritize Graph jobTitle, then TeamsInfo jobTitle/userRole, then fallback
+        designation: graphData?.graphProfile?.jobTitle || member?.jobTitle || member?.userRole || fallback.designation,
+        // Prioritize Graph team details (if available from joinedTeams), then TeamsInfo, then tenantId
+        teamId: graphData?.teamDetails?.id || teams?.id || member?.tenantId || null,
+        teamName: graphData?.teamDetails?.displayName || teams?.name || teams?.displayName || null,
         lastSeenAt: new Date().toISOString(),
       };
 
       await upsertUserProfile(profile);
     } catch (error) {
-      console.error("[Bot] Unable to load Teams profile", error);
+      console.error("[Bot] Unable to load Teams profile or Graph profile", error);
       await upsertUserProfile(fallback);
     }
   }
