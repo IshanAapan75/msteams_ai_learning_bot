@@ -383,7 +383,7 @@ class TeamsBot extends TeamsActivityHandler {
           if (!userResponses || userResponses.length === 0) {
               // First time user, assign first learning module
               const querySpecModule = {
-                  query: "SELECT * FROM c WHERE c.order = 1"
+                  query: "SELECT * FROM c WHERE c[\"order\"] = 1"
               };
               const { resources: learningModules } = await containers.ai_learning.items.query(querySpecModule).fetchAll();
       
