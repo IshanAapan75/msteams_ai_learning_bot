@@ -629,7 +629,10 @@ class TeamsBot extends TeamsActivityHandler {
 
     try {
       const member = await TeamsInfo.getMember(context, userId);
-      const teams = await TeamsInfo.getTeamDetails(context, context.activity.channelData?.team?.id);
+      let teams = null;
+      if (context.activity.channelData && context.activity.channelData.team) {
+        teams = await TeamsInfo.getTeamDetails(context);
+      }
 
       const profile = {
         id: userId,
