@@ -1,5 +1,6 @@
 async function getLeaderboard() {
-  const res = await fetch("http://localhost:3000/api/leaderboard", {
+  const appUrl = process.env.APP_URL || "http://localhost:3000";
+  const res = await fetch(`${appUrl}/api/leaderboard`, {
     cache: "no-store",
   });
   return res.json();
