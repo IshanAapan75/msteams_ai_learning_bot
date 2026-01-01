@@ -274,7 +274,6 @@ class TeamsBot extends TeamsActivityHandler {
       const userName = context.activity.from.name;
 
       await this.ensureUserExists(context, userId, userName);
-      const assignment = await fetchAssignment(userId);
 
       const state = await this.quizState.get(context, {
         inQuiz: false,
