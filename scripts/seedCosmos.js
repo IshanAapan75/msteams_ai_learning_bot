@@ -1,6 +1,6 @@
 const { CosmosClient } = require("@azure/cosmos");
 
-const REQUIRED_ENV_VARS = ["COSMOS_ENDPOINT", "COSMOS_KEY", "ChatBotDB"];
+const REQUIRED_ENV_VARS = ["COSMOS_ENDPOINT", "COSMOS_KEY", "COSMOS_DATABASE"];
 
 function assertEnv() {
   const missing = REQUIRED_ENV_VARS.filter((name) => !process.env[name]);
@@ -83,21 +83,28 @@ const seedData = {
   ai_learning: [
     {
       id: "learning-module-1",
-      userId: "user-1",
       topic: "Responsible AI",
       description: "Foundations of responsible AI usage",
       level: "Beginner",
-      status: "completed",
-      completedAt: new Date().toISOString(),
+      order: 1,
+      quizzes: []
     },
     {
       id: "learning-module-2",
-      userId: "user-2",
       topic: "Prompt Engineering",
       description: "Crafting effective prompts for copilots",
       level: "Intermediate",
-      status: "in_progress",
+      order: 2,
+      quizzes: []
     },
+    {
+        id: "learning-module-3",
+        topic: "Advanced AI Concepts",
+        description: "Diving deep into AI models and architectures",
+        level: "Advanced",
+        order: 3,
+        quizzes: []
+    }
   ],
   rewards: [
     {
@@ -154,12 +161,32 @@ async function seedContainer(database, containerName, documents = []) {
   }
 }
 
+async function resetContainer(database, containerName) {
+    const container = database.container(containerName);
+    try {
+      const { resources: items } = await container.items.readAll().fetchAll();
+      for (const item of items) {
+        await container.item(item.id, item.id).delete();
+        console.log(`[seed] Deleted from ${containerName}:`, item.id);
+      }
+    } catch (error) {
+      if (error.code === 404) {
+        console.log(`[seed] Container ${containerName} not found, skipping reset.`);
+      } else {
+        throw error;
+      }
+    }
+  }
+
 async function main() {
   const client = createClient();
   const database = client.database(process.env.COSMOS_DATABASE || "ChatBotDB");
 
   console.log("Ensuring containers exist...");
   await ensureContainers(database);
+
+  console.log("Resetting ai_learning container...");
+  await resetContainer(database, "ai_learning");
 
   for (const [containerName, docs] of Object.entries(seedData)) {
     console.log(`Seeding container: ${containerName}`);

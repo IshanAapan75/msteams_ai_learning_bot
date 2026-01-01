@@ -1,6 +1,7 @@
 const { TeamsActivityHandler, CardFactory } = require("botbuilder");
 const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
+const { containers } = require("./lib/cosmos");
 const { syncLearningAssignment } = require("./lib/learningPlan.js");
 
 const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -29,6 +30,8 @@ function buildLearningSummaryCard(assignment) {
   if (!assignment?.module) {
     return null;
   }
+
+  assignment.canStart = new Date() >= new Date(assignment.availableAt);
 
   const lines = [
     {
@@ -236,11 +239,31 @@ function buildLanguagePreferenceCard() {
 }
 
 async function fetchAssignment(userId) {
-  const res = await httpFetch(`${appUrl}/api/learning?userId=${encodeURIComponent(userId)}&sync=1`);
-  if (!res.ok) {
-    return null;
-  }
-  return res.json();
+    try {
+        const querySpec = {
+            query: "SELECT * FROM c WHERE c.userId = @userId",
+            parameters: [{ name: "@userId", value: userId }]
+        };
+        const { resources: userResponses } = await containers.responses.items.query(querySpec).fetchAll();
+
+        if (!userResponses || userResponses.length === 0) {
+            return null;
+        }
+
+        const userResponse = userResponses[0];
+        const activeLearning = userResponse.learnings.find(l => l.status !== 'completed');
+
+        if (!activeLearning) {
+            return null;
+        }
+        
+        // The original function returned an object with an 'assignment' property.
+        // I will replicate that structure.
+        return { assignment: activeLearning };
+    } catch (error) {
+        console.error("Error fetching assignment from responses container:", error);
+        return null;
+    }
 }
 
 async function getUserProfile(userId) {
@@ -305,6 +328,41 @@ class TeamsBot extends TeamsActivityHandler {
           state.language = selectedLanguage;
           state.awaitingLanguage = false;
           await context.sendActivity(`✅ Saved **${selectedLanguage}** as your language preference.`);
+
+          // Check if user has a response document
+          const querySpecUser = {
+              query: "SELECT * FROM c WHERE c.userId = @userId",
+              parameters: [{ name: "@userId", value: userId }]
+          };
+          const { resources: userResponses } = await containers.responses.items.query(querySpecUser).fetchAll();
+      
+          if (!userResponses || userResponses.length === 0) {
+              // First time user, assign first learning module
+              const querySpecModule = {
+                  query: "SELECT * FROM c WHERE c.order = 1"
+              };
+              const { resources: learningModules } = await containers.ai_learning.items.query(querySpecModule).fetchAll();
+      
+              if (learningModules.length > 0) {
+                  const firstModule = learningModules[0];
+                  const newResponse = {
+                      id: `${userId}-${Date.now()}`,
+                      userId: userId,
+                      learnings: [{
+                          learningId: firstModule.id,
+                          status: "assigned",
+                          createdAt: new Date().toISOString(),
+                          updatedAt: new Date().toISOString(),
+                          availableAt: new Date(new Date().getTime() + 18 * 60 * 60 * 1000).toISOString(), // +18 hours
+                          module: firstModule,
+                          attempts: []
+                      }],
+                      updatedAt: new Date().toISOString()
+                  };
+                  await containers.responses.items.create(newResponse);
+                  await context.sendActivity("I've assigned your first learning module! Type `/learning` to get started.");
+              }
+          }
         } catch (error) {
           console.error("[Bot] Failed to update language", error);
           await context.sendActivity("I couldn't save that preference. Please try again.");
@@ -331,11 +389,24 @@ class TeamsBot extends TeamsActivityHandler {
       state.aiLearningQuizzes = assignment?.assignment?.module?.quizzes || state.aiLearningQuizzes;
 
       if (text === "start quiz") {
-        if (assignment?.assignment && assignment.assignment.status !== "completed") {
-          await context.sendActivity(
-            "Please finish the current learning module before starting the quiz. Type `/learning` to view it."
-          );
-          return;
+        if (assignment?.assignment) {
+            if (assignment.assignment.status !== "completed") {
+                await context.sendActivity(
+                    "Please finish the current learning module before starting the quiz. Type `/learning` to view it."
+                );
+                return;
+            }
+
+            const completedAt = new Date(assignment.assignment.completedAt);
+            const now = new Date();
+            const diffInMinutes = (now - completedAt) / (1000 * 60);
+
+            if (diffInMinutes < 5) {
+                await context.sendActivity(
+                    `You've completed the module! Please wait for another ${Math.ceil(5 - diffInMinutes)} minute(s) before starting the quiz.`
+                );
+                return;
+            }
         }
 
         const quizPayload = {
@@ -450,16 +521,29 @@ class TeamsBot extends TeamsActivityHandler {
     }
 
     try {
-      const res = await httpFetch(`${appUrl}/api/learning`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ learningId, userId, status: "completed" }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        await context.sendActivity(body.error || "Couldn't mark the learning as completed.");
-        return;
+      const { resources: userResponses } = await containers.responses.items.query({
+          query: "SELECT * FROM c WHERE c.userId = @userId",
+          parameters: [{ name: "@userId", value: userId }]
+      }).fetchAll();
+
+      if (!userResponses || userResponses.length === 0) {
+          await context.sendActivity("I couldn't find your learning progress.");
+          return;
       }
+
+      const userResponse = userResponses[0];
+      const learning = userResponse.learnings.find(l => l.learningId === learningId);
+
+      if (!learning) {
+          await context.sendActivity("I couldn't find that learning module in your plan.");
+          return;
+      }
+
+      learning.status = "completed";
+      learning.completedAt = new Date().toISOString();
+      learning.updatedAt = learning.completedAt;
+
+      await containers.responses.items.upsert(userResponse);
 
       state.aiLearningId = learningId;
       state.aiLearningStatus = "completed";
@@ -485,41 +569,77 @@ class TeamsBot extends TeamsActivityHandler {
       return;
     }
 
-    const body = {
-      learningId,
-      userId,
-      survey: {
-        actionType: payload.actionType,
-        timeSaved: payload.timeSaved,
-        confidence: payload.confidence,
-        notes: payload.notes || null,
-      },
-    };
-
     try {
-      const res = await httpFetch(`${appUrl}/api/learning`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+        const { resources: userResponses } = await containers.responses.items.query({
+            query: "SELECT * FROM c WHERE c.userId = @userId",
+            parameters: [{ name: "@userId", value: userId }]
+        }).fetchAll();
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        await context.sendActivity(data.error || "Couldn't save that. Please try again.");
-        return;
-      }
-
-      await context.sendActivity("🙌 Logged! I'll cue up your next learning once it's available.");
-      const assignment = await fetchAssignment(userId);
-      if (assignment?.assignment) {
-        const card = buildLearningSummaryCard(assignment.assignment);
-        if (card) {
-          await context.sendActivity({ attachments: [card] });
+        if (!userResponses || userResponses.length === 0) {
+            await context.sendActivity("I couldn't find your learning progress.");
+            return;
         }
-      }
+
+        const userResponse = userResponses[0];
+        const learning = userResponse.learnings.find(l => l.learningId === payload.learningId);
+
+        if (!learning) {
+            await context.sendActivity("I couldn't find that learning module in your plan.");
+            return;
+        }
+        
+        learning.survey = {
+            actionType: payload.actionType,
+            timeSaved: payload.timeSaved,
+            confidence: payload.confidence,
+            notes: payload.notes || null,
+            submittedAt: new Date().toISOString()
+        };
+        learning.updatedAt = new Date().toISOString();
+
+        if (learning.quizPassedAt) {
+            const quizPassedAt = new Date(learning.quizPassedAt);
+            const now = new Date();
+            const diffInHours = (now - quizPassedAt) / (1000 * 60 * 60);
+
+            if (diffInHours >= 1) {
+                // Assign next learning module
+                const currentOrder = learning.module.order;
+                const nextOrder = currentOrder + 1;
+
+                const { resources: nextModules } = await containers.ai_learning.items.query({
+                    query: "SELECT * FROM c WHERE c.order = @order",
+                    parameters: [{ name: "@order", value: nextOrder }]
+                }).fetchAll();
+
+                if (nextModules.length > 0) {
+                    const nextModule = nextModules[0];
+                    userResponse.learnings.push({
+                        learningId: nextModule.id,
+                        status: "assigned",
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                        availableAt: new Date(new Date().getTime() + 18 * 60 * 60 * 1000).toISOString(), // +18 hours
+                        module: nextModule,
+                        attempts: []
+                    });
+                    await containers.responses.items.upsert(userResponse);
+                    await context.sendActivity("🙌 Logged! I've assigned your next learning module.");
+                    return; // exit after assigning
+                } else {
+                    await containers.responses.items.upsert(userResponse);
+                    await context.sendActivity("🙌 Logged! You have completed all available learning modules.");
+                    return; // exit
+                }
+            }
+        }
+        
+        await containers.responses.items.upsert(userResponse);
+        await context.sendActivity("🙌 Logged! Your next learning module will be available in about an hour.");
+
     } catch (error) {
-      console.error("[Bot] Failed to submit survey", error);
-      await context.sendActivity("Something went wrong while saving that. Please try again.");
+        console.error("[Bot] Failed to submit survey", error);
+        await context.sendActivity("Something went wrong while saving that. Please try again.");
     }
   }
 
@@ -586,6 +706,24 @@ class TeamsBot extends TeamsActivityHandler {
         await context.sendActivity(
           `📊 Quiz complete! Score: ${result.score.correct}/${result.score.total}. Result: ${result.result}.`
         );
+
+        const { resources: userResponses } = await containers.responses.items.query({
+            query: "SELECT * FROM c WHERE c.userId = @userId",
+            parameters: [{ name: "@userId", value: userId }]
+        }).fetchAll();
+
+        if (userResponses.length > 0) {
+            const userResponse = userResponses[0];
+            const learning = userResponse.learnings.find(l => l.learningId === state.aiLearningId);
+            if (learning) {
+                learning.attempts = learning.attempts || [];
+                learning.attempts.push(result);
+                if (result.result === "passed") {
+                    learning.quizPassedAt = new Date().toISOString();
+                }
+                await containers.responses.items.upsert(userResponse);
+            }
+        }
       }
     } catch (error) {
       console.error("[Bot] Error submitting quiz attempt", error);
