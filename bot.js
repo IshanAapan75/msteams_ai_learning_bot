@@ -3,7 +3,8 @@ const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
 const { syncLearningAssignment } = require("./lib/learningPlan.js");
-const { AppCredential, createMicrosoftGraphClientWithCredential } = require("@microsoft/teamsfx");
+const { AppCredential } = require("@microsoft/teamsfx");
+const { Client } = require("@microsoft/microsoft-graph-client");
 
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
@@ -70,7 +71,14 @@ async function callMsGraph(context) {
     return null;
   }
 
-  const graphClient = createMicrosoftGraphClientWithCredential(credential, [GRAPH_SCOPE]);
+  const graphClient = Client.initWithMiddleware({
+    authProvider: {
+      getAccessToken: async () => {
+        const token = await credential.getToken(GRAPH_SCOPE);
+        return token?.token;
+      },
+    },
+  });
 
   try {
     const graphProfile = await graphClient
