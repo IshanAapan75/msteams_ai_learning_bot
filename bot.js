@@ -21,6 +21,7 @@ const LANGUAGE_CHOICES = [
   "Chinese",
   "Korean",
   "Italian",
+  "Arabic",
   "Other",
 ];
 
