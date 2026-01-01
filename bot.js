@@ -88,47 +88,7 @@ async function callMsGraph(context) {
       )
       .get();
 
-    let manager = null;
-    try {
-      manager = await graphClient
-        .api(`/users/${aadObjectId}/manager`)
-        .select("id,displayName,jobTitle,mail,userPrincipalName")
-        .get();
-    } catch (managerError) {
-      if (managerError?.statusCode !== 404) {
-        console.warn("[Graph] Failed to load manager info:", managerError.message);
-      }
-    }
-
-    let directReports = [];
-    try {
-      const directReportsResult = await graphClient
-        .api(`/users/${aadObjectId}/directReports`)
-        .select("id,displayName,jobTitle,mail,userPrincipalName")
-        .top(50)
-        .get();
-      directReports = directReportsResult?.value || [];
-    } catch (directReportsError) {
-      if (directReportsError?.statusCode !== 404) {
-        console.warn("[Graph] Failed to load direct reports:", directReportsError.message);
-      }
-    }
-
-    let teamDetails = null;
-    try {
-      const joinedTeams = await graphClient
-        .api(`/users/${aadObjectId}/joinedTeams`)
-        .select("id,displayName,description")
-        .top(1)
-        .get();
-      if (joinedTeams?.value?.length) {
-        teamDetails = joinedTeams.value[0];
-      }
-    } catch (teamError) {
-      console.warn("[Graph] Could not fetch joined teams for user:", teamError.message);
-    }
-
-    return { graphProfile, manager, directReports, teamDetails };
+    return { graphProfile };
   } catch (error) {
     console.error("[Graph] Error calling Microsoft Graph API:", error);
     if (error.statusCode === 401) {
@@ -930,18 +890,11 @@ class TeamsBot extends TeamsActivityHandler {
         // Prioritize Graph jobTitle, then TeamsInfo jobTitle/userRole, then fallback
         designation: graphData?.graphProfile?.jobTitle || member?.jobTitle || member?.userRole || fallback.designation,
         // Prioritize Graph team details (if available from joinedTeams), then TeamsInfo, then tenantId
-        teamId: graphData?.teamDetails?.id || teams?.id || member?.tenantId || null,
-        teamName: graphData?.teamDetails?.displayName || teams?.name || teams?.displayName || null,
+        teamId: teams?.id || member?.tenantId || null,
+        teamName: teams?.name || teams?.displayName || null,
         lastSeenAt: new Date().toISOString(),
-        manager:
-          graphData?.manager &&
-          {
-            id: graphData.manager.id,
-            name: graphData.manager.displayName,
-            jobTitle: graphData.manager.jobTitle,
-            email: graphData.manager.mail || graphData.manager.userPrincipalName || null,
-          },
-        directReports: graphData?.directReports || [],
+        manager: null,
+        directReports: [],
       };
 
       await upsertUserProfile(profile);
