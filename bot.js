@@ -353,7 +353,7 @@ class TeamsBot extends TeamsActivityHandler {
                           status: "assigned",
                           createdAt: new Date().toISOString(),
                           updatedAt: new Date().toISOString(),
-                          availableAt: new Date(new Date().getTime() + 18 * 60 * 60 * 1000).toISOString(), // +18 hours
+                          availableAt: new Date().toISOString(),
                           module: firstModule,
                           attempts: []
                       }],
