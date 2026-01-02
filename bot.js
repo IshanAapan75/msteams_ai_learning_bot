@@ -296,7 +296,12 @@ class TeamsBot extends TeamsActivityHandler {
       const userId = context.activity.from.id;
       const userName = context.activity.from.name;
 
-      await this.ensureUserExists(context, userId, userName);
+      const seenUsers = (context.turnState.get("handledUsers") || new Set());
+      if (!seenUsers.has(userId)) {
+        await this.ensureUserExists(context, userId, userName);
+        seenUsers.add(userId);
+        context.turnState.set("handledUsers", seenUsers);
+      }
 
       const state = await this.quizState.get(context, {
         inQuiz: false,
@@ -344,22 +349,25 @@ class TeamsBot extends TeamsActivityHandler {
       
               if (learningModules.length > 0) {
                   const firstModule = learningModules[0];
+                  const nowIso = new Date().toISOString();
                   const newResponse = {
                       id: `${userId}-${Date.now()}`,
                       userId: userId,
                       learnings: [{
                           learningId: firstModule.id,
                           status: "assigned",
-                          createdAt: new Date().toISOString(),
-                          updatedAt: new Date().toISOString(),
-                          availableAt: new Date().toISOString(),
+                          createdAt: nowIso,
+                          updatedAt: nowIso,
+                          availableAt: nowIso,
                           module: firstModule,
                           attempts: []
                       }],
-                      updatedAt: new Date().toISOString()
+                      updatedAt: nowIso
                   };
                   await containers.responses.items.create(newResponse);
-                  await context.sendActivity("I've assigned your first learning module! Type `/learning` to get started.");
+                  await context.sendActivity(
+                    `📘 I've assigned **${firstModule.title || firstModule.topic || "your first learning"}**. Type \`/learning\` to open it.`
+                  );
               }
           }
         } catch (error) {
@@ -504,8 +512,9 @@ class TeamsBot extends TeamsActivityHandler {
       for (const member of context.activity.membersAdded) {
         if (member.id !== context.activity.recipient.id) {
           await this.ensureUserExists(context, member.id, member.name);
+          const displayName = member?.name || member?.givenName || context.activity.from?.name || "there";
           await context.sendActivity(
-            `👋 **Welcome to AI Champions Bot, ${member.name}!**\nI'll assign your first AI learning shortly.`
+            `👋 **Welcome to AI Champions Bot, ${displayName}!**\nI'll assign your first AI learning shortly.`
           );
         }
       }
@@ -798,56 +807,6 @@ class TeamsBot extends TeamsActivityHandler {
       console.error("[Bot] Unable to load Teams profile", error);
       console.warn("[Bot] Falling back to minimal profile for user", userId);
       await upsertUserProfile(fallback);
-    }
-
-    await this.ensureInitialLearning(userId);
-  }
-
-  async ensureInitialLearning(userId) {
-    try {
-      const { resources: userResponses } = await containers.responses.items
-        .query({
-          query: "SELECT * FROM c WHERE c.userId = @userId",
-          parameters: [{ name: "@userId", value: userId }],
-        })
-        .fetchAll();
-
-      if (userResponses && userResponses.length > 0) {
-        return;
-      }
-
-      const { resources: learningModules } = await containers.ai_learning.items
-        .query({ query: "SELECT * FROM c WHERE c[\"order\"] = 1" })
-        .fetchAll();
-
-      if (!learningModules || learningModules.length === 0) {
-        console.warn("[Bot] No learning modules with order = 1 found; cannot auto-assign.");
-        return;
-      }
-
-      const firstModule = learningModules[0];
-      const timestamp = new Date().toISOString();
-      const newResponse = {
-        id: `${userId}-${Date.now()}`,
-        userId,
-        learnings: [
-          {
-            learningId: firstModule.id,
-            status: "assigned",
-            createdAt: timestamp,
-            updatedAt: timestamp,
-            availableAt: timestamp,
-            module: firstModule,
-            attempts: [],
-          },
-        ],
-        updatedAt: timestamp,
-      };
-
-      await containers.responses.items.create(newResponse);
-      console.info("[Bot] Auto-assigned first learning module for user", userId);
-    } catch (error) {
-      console.error("[Bot] Failed to auto-assign learning module", error);
     }
   }
 
