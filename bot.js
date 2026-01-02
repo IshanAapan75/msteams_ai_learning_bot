@@ -3,6 +3,7 @@ const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
 const { syncLearningAssignment } = require("./lib/learningPlan.js");
+const { awardXpAction } = require("./lib/rewards.js");
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
 const httpFetch = (...args) =>
@@ -11,9 +12,11 @@ const httpFetch = (...args) =>
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
 
 const MINUTES_TO_MS = 60 * 1000;
+const HOURS_TO_MS = 60 * MINUTES_TO_MS;
 const LEARNING_START_DELAY_MINUTES = Number(process.env.AI_LEARNING_START_DELAY_MINUTES ?? 5);
-const QUIZ_START_DELAY_MINUTES = Number(process.env.AI_QUIZ_START_DELAY_MINUTES ?? 5);
-const USAGE_START_DELAY_MINUTES = Number(process.env.AI_USAGE_START_DELAY_MINUTES ?? 5);
+const QUIZ_START_DELAY_MINUTES = Number(process.env.AI_QUIZ_START_DELAY_MINUTES ?? 20);
+const USAGE_START_DELAY_MINUTES = Number(process.env.AI_USAGE_START_DELAY_MINUTES ?? 120);
+const NEXT_LEARNING_DELAY_HOURS = Number(process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 18);
 
 function computeStartTimestamp(delayMinutes) {
   const minutes = Number.isFinite(Number(delayMinutes)) ? Number(delayMinutes) : 0;
@@ -470,22 +473,50 @@ class TeamsBot extends TeamsActivityHandler {
       state.aiLearningQuizzes = assignment?.assignment?.module?.quizzes || state.aiLearningQuizzes;
 
       if (text === "start quiz") {
-        if (assignment?.assignment) {
-            if (assignment.assignment.status !== "completed") {
-                await context.sendActivity(
-                    "Please finish the current learning module before starting the quiz. Type `/learning` to view it."
-                );
-                return;
-            }
+        const activeLearning = assignment?.assignment;
 
-            const learningEntry = await loadLearningEntry(userId, assignment.assignment.learningId);
-            const quizAvailableAt = learningEntry?.quizAvailableAt;
-            const delayMessage = buildDelayMessage("Quiz", quizAvailableAt);
-            if (delayMessage) {
-              await context.sendActivity(delayMessage);
-              return;
-            }
+        if (activeLearning && activeLearning.status !== "completed") {
+          await context.sendActivity(
+            "Please finish the current learning module before starting the quiz. Type `/learning` to view it."
+          );
+          return;
         }
+
+        const candidateLearningId = activeLearning?.learningId || state.aiLearningId;
+        const candidateStatus = activeLearning?.status || state.aiLearningStatus;
+
+        let learningEntry = null;
+        if (candidateLearningId) {
+          learningEntry = await loadLearningEntry(userId, candidateLearningId);
+        }
+
+        if (!learningEntry) {
+          await context.sendActivity(
+            "I couldn't find a completed learning module ready for a quiz yet. Please complete a module first."
+          );
+          return;
+        }
+
+        const effectiveStatus = (candidateStatus || learningEntry.status || "").toLowerCase();
+        if (effectiveStatus !== "completed") {
+          await context.sendActivity(
+            "Please finish the current learning module before starting the quiz. Type `/learning` to view it."
+          );
+          return;
+        }
+
+        const quizAvailableAt = learningEntry?.quizAvailableAt;
+        const delayMessage = buildDelayMessage("Quiz", quizAvailableAt);
+        if (delayMessage) {
+          await context.sendActivity(delayMessage);
+          return;
+        }
+
+        const derivedLearningId = learningEntry.learningId || candidateLearningId;
+        const derivedQuizzes = activeLearning?.module?.quizzes || learningEntry?.module?.quizzes || state.aiLearningQuizzes;
+
+        state.aiLearningId = derivedLearningId || state.aiLearningId;
+        state.aiLearningQuizzes = derivedQuizzes || state.aiLearningQuizzes;
 
         const quizPayload = {
           userId,
@@ -545,6 +576,48 @@ class TeamsBot extends TeamsActivityHandler {
         if (card) {
           await context.sendActivity({ attachments: [card] });
         }
+        return;
+      }
+
+      if (text === "log usage") {
+        const activeLearning = assignment?.assignment;
+        const candidateLearningId = activeLearning?.learningId || state.aiLearningId;
+
+        if (!candidateLearningId) {
+          await context.sendActivity(
+            "I couldn't find a learning module to log usage for yet. Please complete a module first."
+          );
+          return;
+        }
+
+        const learningEntry = await loadLearningEntry(userId, candidateLearningId);
+        if (!learningEntry) {
+          await context.sendActivity(
+            "I couldn't find that learning module in your plan. Please complete a learning module first."
+          );
+          return;
+        }
+
+        if (!learningEntry.quizPassedAt) {
+          await context.sendActivity(
+            "Complete the quiz for your current learning module before logging a usage win."
+          );
+          return;
+        }
+
+        if (learningEntry.survey?.submittedAt) {
+          await context.sendActivity("You've already logged a usage win for this module. Great job!");
+          return;
+        }
+
+        const usageDelayMessage = buildDelayMessage("Usage logging", learningEntry.usageAvailableAt);
+        if (usageDelayMessage) {
+          await context.sendActivity(usageDelayMessage);
+          return;
+        }
+
+        const surveyCard = buildSurveyCard(learningEntry.learningId);
+        await context.sendActivity({ attachments: [surveyCard] });
         return;
       }
 
@@ -632,6 +705,8 @@ class TeamsBot extends TeamsActivityHandler {
 
       await containers.responses.items.upsert(userResponse);
 
+      await this.awardLearningCompletion(userId, learningId);
+
       state.aiLearningId = learningId;
       state.aiLearningStatus = "completed";
 
@@ -676,65 +751,75 @@ class TeamsBot extends TeamsActivityHandler {
             await context.sendActivity("I couldn't find that learning module in your plan.");
             return;
         }
+
+        const usageDelayMessage = buildDelayMessage("Usage logging", learning.usageAvailableAt);
+        if (usageDelayMessage) {
+            await context.sendActivity(usageDelayMessage);
+            return;
+        }
         
+        const submittedAt = new Date();
+        const submittedAtIso = submittedAt.toISOString();
+
         learning.survey = {
             actionType: payload.actionType,
             timeSaved: payload.timeSaved,
             confidence: payload.confidence,
             notes: payload.notes || null,
-            submittedAt: new Date().toISOString()
+            submittedAt: submittedAtIso
         };
-        learning.updatedAt = new Date().toISOString();
+        learning.updatedAt = submittedAtIso;
+        learning.usageAvailableAt = null;
 
+        let nextAssignmentMessage = null;
         if (learning.quizPassedAt) {
-            const quizPassedAt = new Date(learning.quizPassedAt);
-            const now = new Date();
-            const diffInHours = (now - quizPassedAt) / (1000 * 60 * 60);
+            const currentOrder = learning.module.order;
+            const nextOrder = currentOrder + 1;
 
-            if (diffInHours >= 1) {
-                // Assign next learning module
-                const currentOrder = learning.module.order;
-                const nextOrder = currentOrder + 1;
+            const { resources: nextModules } = await containers.ai_learning.items.query({
+                query: "SELECT * FROM c WHERE c.order = @order",
+                parameters: [{ name: "@order", value: nextOrder }]
+            }).fetchAll();
 
-                const { resources: nextModules } = await containers.ai_learning.items.query({
-                    query: "SELECT * FROM c WHERE c.order = @order",
-                    parameters: [{ name: "@order", value: nextOrder }]
-                }).fetchAll();
-
-                if (nextModules.length > 0) {
-                    const nextModule = nextModules[0];
-                    const nextAvailableAt = computeStartTimestamp(LEARNING_START_DELAY_MINUTES);
-                    userResponse.learnings.push({
-                        learningId: nextModule.id,
-                        status: "assigned",
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString(),
-                        availableAt: nextAvailableAt,
-                        module: nextModule,
-                        attempts: [],
-                        quizAvailableAt: null,
-                        usageAvailableAt: null
-                    });
-                    await containers.responses.items.upsert(userResponse);
-                    const delayMsg = buildDelayMessage("Next learning", nextAvailableAt) ||
-                        "🙌 Logged! I've assigned your next learning module.";
-                    await context.sendActivity(delayMsg);
-                    return; // exit after assigning
-                } else {
-                    await containers.responses.items.upsert(userResponse);
-                    await context.sendActivity("🙌 Logged! You have completed all available learning modules.");
-                    return; // exit
-                }
+            if (nextModules.length > 0) {
+                const nextModule = nextModules[0];
+                const submittedAtMs = new Date(submittedAtIso).getTime();
+                const nextAvailableAt = new Date(submittedAtMs + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
+                const nextLearningEntry = {
+                    learningId: nextModule.id,
+                    status: "assigned",
+                    createdAt: submittedAtIso,
+                    updatedAt: submittedAtIso,
+                    availableAt: nextAvailableAt,
+                    module: nextModule,
+                    attempts: [],
+                    quizAvailableAt: null,
+                    usageAvailableAt: null,
+                };
+                userResponse.learnings.push(nextLearningEntry);
+                state.aiLearningId = nextLearningEntry.learningId;
+                state.aiLearningStatus = nextLearningEntry.status;
+                state.aiLearningQuizzes = Array.isArray(nextModule.quizzes) ? nextModule.quizzes : [];
+                nextAssignmentMessage =
+                    buildDelayMessage("Next learning", nextAvailableAt) ||
+                    "🙌 Logged! I've assigned your next learning module.";
+            } else {
+                nextAssignmentMessage = "🙌 Logged! You have completed all available learning modules.";
             }
         }
         
         await containers.responses.items.upsert(userResponse);
-        const unlockAt = learning.quizPassedAt
-            ? new Date(new Date(learning.quizPassedAt).getTime() + 60 * 60 * 1000).toISOString()
-            : null;
-        const waitingMsg = buildDelayMessage("Next learning", unlockAt) ||
-            "🙌 Logged! Your next learning module will be available soon.";
-        await context.sendActivity(waitingMsg);
+        if (nextAssignmentMessage) {
+            await context.sendActivity(nextAssignmentMessage);
+        } else {
+            const fallbackUnlock = new Date(new Date(submittedAtIso).getTime() + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
+            const waitingMsg =
+                buildDelayMessage("Next learning", fallbackUnlock) ||
+                "🙌 Logged! Your next learning module will be available soon.";
+            await context.sendActivity(waitingMsg);
+        }
+
+        await this.awardUsageLogging(userId, learning.learningId, payload);
 
     } catch (error) {
         console.error("[Bot] Failed to submit survey", error);
@@ -899,6 +984,46 @@ class TeamsBot extends TeamsActivityHandler {
       console.error("[Bot] Unable to load Teams profile", error);
       console.warn("[Bot] Falling back to minimal profile for user", userId);
       await upsertUserProfile(fallback);
+    }
+  }
+
+  async awardLearningCompletion(userId, learningId) {
+    if (!userId || !learningId) {
+      return;
+    }
+    try {
+      await awardXpAction({
+        userId,
+        actionType: "micro-learning",
+        metadata: {
+          details: {
+            learningId,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("[Bot] Failed to award learning XP", error);
+    }
+  }
+
+  async awardUsageLogging(userId, learningId, payload) {
+    if (!userId || !learningId) {
+      return;
+    }
+    try {
+      await awardXpAction({
+        userId,
+        actionType: "ai-usage",
+        metadata: {
+          details: {
+            learningId,
+            actionType: payload?.actionType || null,
+            timeSaved: payload?.timeSaved || null,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("[Bot] Failed to award usage XP", error);
     }
   }
 
