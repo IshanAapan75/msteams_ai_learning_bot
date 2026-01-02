@@ -3,100 +3,12 @@ const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
 const { syncLearningAssignment } = require("./lib/learningPlan.js");
-const { AppCredential } = require("@microsoft/teamsfx");
-const { Client } = require("@microsoft/microsoft-graph-client");
-
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
 const httpFetch = (...args) =>
   typeof fetch === "function"
     ? fetch(...args)
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
-
-const GRAPH_SCOPE = process.env.MS_GRAPH_SCOPE || "https://graph.microsoft.com/.default";
-let cachedGraphCredential = null;
-let graphCredentialWarningLogged = false;
-
-function getGraphAuthConfig() {
-  const clientId = process.env.M365_CLIENT_ID || process.env.MicrosoftAppId;
-  const clientSecret = process.env.M365_CLIENT_SECRET || process.env.MicrosoftAppPassword;
-  const tenantId = process.env.M365_TENANT_ID || process.env.MicrosoftAppTenantId;
-  const authorityHost =
-    process.env.M365_AUTHORITY_HOST || process.env.AZURE_AUTHORITY_HOST || "https://login.microsoftonline.com";
-
-  if (!clientId || !clientSecret || !tenantId) {
-    if (!graphCredentialWarningLogged) {
-      console.warn(
-        "[Graph] Missing client credential configuration. Set M365_CLIENT_ID, M365_CLIENT_SECRET, and M365_TENANT_ID (falling back to MicrosoftApp* env vars)."
-      );
-      graphCredentialWarningLogged = true;
-    }
-    return null;
-  }
-
-  return { clientId, clientSecret, tenantId, authorityHost };
-}
-
-function getGraphCredential() {
-  if (cachedGraphCredential) {
-    return cachedGraphCredential;
-  }
-
-  const authConfig = getGraphAuthConfig();
-  if (!authConfig) {
-    return null;
-  }
-
-  try {
-    cachedGraphCredential = new AppCredential(authConfig);
-    return cachedGraphCredential;
-  } catch (error) {
-    if (!graphCredentialWarningLogged) {
-      console.error("[Graph] Failed to initialize AppCredential:", error.message);
-      graphCredentialWarningLogged = true;
-    }
-    return null;
-  }
-}
-
-// Helper function to call MS Graph using the bot's application identity
-async function callMsGraph(context) {
-  const credential = getGraphCredential();
-  const aadObjectId = context?.activity?.from?.aadObjectId;
-
-  if (!credential || !aadObjectId) {
-    if (!aadObjectId) {
-      console.warn("[Graph] Missing aadObjectId on incoming activity; skipping Graph lookup.");
-    }
-    return null;
-  }
-
-  const graphClient = Client.initWithMiddleware({
-    authProvider: {
-      getAccessToken: async () => {
-        const token = await credential.getToken(GRAPH_SCOPE);
-        return token?.token;
-      },
-    },
-  });
-
-  try {
-    const graphProfile = await graphClient
-      .api(`/users/${aadObjectId}`)
-      .select(
-        "id,displayName,givenName,surname,mail,jobTitle,department,companyName,mobilePhone,officeLocation,userPrincipalName,businessPhones"
-      )
-      .get();
-
-    return { graphProfile };
-  } catch (error) {
-    console.error("[Graph] Error calling Microsoft Graph API:", error);
-    if (error.statusCode === 401) {
-      console.warn("[Graph] Application credentials are unauthorized. Check API permissions and secrets.");
-    }
-    return null;
-  }
-}
 
 const LANGUAGE_CHOICES = [
   "English",
@@ -862,34 +774,18 @@ class TeamsBot extends TeamsActivityHandler {
         teams = await TeamsInfo.getTeamDetails(context);
       }
 
-      let graphData = null;
-      // Only call Graph API if aadObjectId is available for credential lookup
-      if (member?.aadObjectId) {
-        graphData = await callMsGraph(context);
-        if (!graphData) {
-          console.warn("[Bot] Graph data unavailable for user", userId, "- proceeding with Teams profile only.");
-        }
-      } else {
-        console.warn("[Bot] member.aadObjectId not available, cannot call Graph API for user:", userId);
-      }
-
       const profile = {
         id: userId,
-        // Prioritize existing name, then Graph, then TeamsInfo, then fallback
-        name: (userName || graphData?.graphProfile?.displayName || `${member?.givenName || ""} ${member?.surname || ""}` || fallback.name || "").trim() || fallback.name,
-        // Prioritize existing email, then Graph, then TeamsInfo
+        name:
+          (userName || `${member?.givenName || ""} ${member?.surname || ""}` || member?.name || fallback.name || "")
+            .trim()
+            .replace(/\s+/g, " ") || fallback.name,
         email:
-          (member?.email ||
-            member?.userPrincipalName ||
-            graphData?.graphProfile?.mail ||
-            graphData?.graphProfile?.userPrincipalName ||
-            "")
+          (member?.email || member?.userPrincipalName || context?.activity?.from?.email || "")
             .toString()
             .toLowerCase()
             .trim() || null,
-        // Prioritize Graph jobTitle, then TeamsInfo jobTitle/userRole, then fallback
-        designation: graphData?.graphProfile?.jobTitle || member?.jobTitle || member?.userRole || fallback.designation,
-        // Prioritize Graph team details (if available from joinedTeams), then TeamsInfo, then tenantId
+        designation: member?.jobTitle || member?.userRole || fallback.designation,
         teamId: teams?.id || member?.tenantId || null,
         teamName: teams?.name || teams?.displayName || null,
         lastSeenAt: new Date().toISOString(),
@@ -899,9 +795,59 @@ class TeamsBot extends TeamsActivityHandler {
 
       await upsertUserProfile(profile);
     } catch (error) {
-      console.error("[Bot] Unable to load Teams profile or Graph profile", error);
+      console.error("[Bot] Unable to load Teams profile", error);
       console.warn("[Bot] Falling back to minimal profile for user", userId);
       await upsertUserProfile(fallback);
+    }
+
+    await this.ensureInitialLearning(userId);
+  }
+
+  async ensureInitialLearning(userId) {
+    try {
+      const { resources: userResponses } = await containers.responses.items
+        .query({
+          query: "SELECT * FROM c WHERE c.userId = @userId",
+          parameters: [{ name: "@userId", value: userId }],
+        })
+        .fetchAll();
+
+      if (userResponses && userResponses.length > 0) {
+        return;
+      }
+
+      const { resources: learningModules } = await containers.ai_learning.items
+        .query({ query: "SELECT * FROM c WHERE c[\"order\"] = 1" })
+        .fetchAll();
+
+      if (!learningModules || learningModules.length === 0) {
+        console.warn("[Bot] No learning modules with order = 1 found; cannot auto-assign.");
+        return;
+      }
+
+      const firstModule = learningModules[0];
+      const timestamp = new Date().toISOString();
+      const newResponse = {
+        id: `${userId}-${Date.now()}`,
+        userId,
+        learnings: [
+          {
+            learningId: firstModule.id,
+            status: "assigned",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            availableAt: timestamp,
+            module: firstModule,
+            attempts: [],
+          },
+        ],
+        updatedAt: timestamp,
+      };
+
+      await containers.responses.items.create(newResponse);
+      console.info("[Bot] Auto-assigned first learning module for user", userId);
+    } catch (error) {
+      console.error("[Bot] Failed to auto-assign learning module", error);
     }
   }
 
