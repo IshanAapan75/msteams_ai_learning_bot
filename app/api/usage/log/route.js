@@ -26,6 +26,22 @@ export async function POST(req) {
       return NextResponse.json({ error: "No active or completable learning module found to log usage for." }, { status: 404 });
     }
 
+    const usageAvailableAt = currentLearning.usageAvailableAt;
+    if (usageAvailableAt) {
+      const unlockTime = new Date(usageAvailableAt).getTime();
+      if (!Number.isNaN(unlockTime) && unlockTime > Date.now()) {
+        const diffMinutes = Math.ceil((unlockTime - Date.now()) / (60 * 1000));
+        return NextResponse.json(
+          {
+            error: "Usage logging is not unlocked yet.",
+            usageAvailableAt,
+            minutesRemaining: diffMinutes,
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     // Update the survey data for the current learning module
     currentLearning.survey = {
       actionType: payload.taskType,
@@ -35,6 +51,7 @@ export async function POST(req) {
       submittedAt: new Date().toISOString(),
     };
     currentLearning.updatedAt = new Date().toISOString();
+    currentLearning.usageAvailableAt = null;
 
     // Persist the updated userResponse document
     await containers.responses.items.upsert(userResponse);

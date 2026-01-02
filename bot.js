@@ -10,6 +10,75 @@ const httpFetch = (...args) =>
     ? fetch(...args)
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
 
+const MINUTES_TO_MS = 60 * 1000;
+const LEARNING_START_DELAY_MINUTES = Number(process.env.AI_LEARNING_START_DELAY_MINUTES ?? 5);
+const QUIZ_START_DELAY_MINUTES = Number(process.env.AI_QUIZ_START_DELAY_MINUTES ?? 5);
+const USAGE_START_DELAY_MINUTES = Number(process.env.AI_USAGE_START_DELAY_MINUTES ?? 5);
+
+function computeStartTimestamp(delayMinutes) {
+  const minutes = Number.isFinite(Number(delayMinutes)) ? Number(delayMinutes) : 0;
+  const ms = Math.max(0, minutes) * MINUTES_TO_MS;
+  return new Date(Date.now() + ms).toISOString();
+}
+
+function formatTimeRemaining(targetIso) {
+  if (!targetIso) {
+    return null;
+  }
+  const target = new Date(targetIso).getTime();
+  if (Number.isNaN(target)) {
+    return null;
+  }
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) {
+    return null;
+  }
+  const totalMinutes = Math.ceil(diffMs / MINUTES_TO_MS);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+  if (hours > 0) {
+    parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
+  }
+  if (minutes > 0) {
+    parts.push(`${minutes} minute${minutes === 1 ? "" : "s"}`);
+  }
+  if (!parts.length) {
+    parts.push("less than a minute");
+  }
+  return parts.join(" and ");
+}
+
+function buildDelayMessage(activityLabel, targetIso) {
+  const remaining = formatTimeRemaining(targetIso);
+  if (!remaining) {
+    return null;
+  }
+  return `⏳ ${activityLabel} unlocks in ${remaining}. I'll remind you when it's ready.`;
+}
+
+async function loadLearningEntry(userId, learningId) {
+  if (!userId || !learningId) {
+    return null;
+  }
+  try {
+    const { resources } = await containers.responses.items
+      .query({
+        query: "SELECT * FROM c WHERE c.userId = @userId",
+        parameters: [{ name: "@userId", value: userId }],
+      })
+      .fetchAll();
+    const doc = resources?.[0];
+    if (!doc || !Array.isArray(doc.learnings)) {
+      return null;
+    }
+    return doc.learnings.find((entry) => entry.learningId === learningId) || null;
+  } catch (error) {
+    console.error("[Bot] Failed to load learning entry", error);
+    return null;
+  }
+}
+
 const LANGUAGE_CHOICES = [
   "English",
   "Spanish",
@@ -30,7 +99,8 @@ function buildLearningSummaryCard(assignment) {
     return null;
   }
 
-  assignment.canStart = new Date() >= new Date(assignment.availableAt);
+  const startAt = assignment.availableAt || assignment.assignedAt;
+  assignment.canStart = !startAt || new Date() >= new Date(startAt);
 
   const lines = [
     {
@@ -255,6 +325,8 @@ async function fetchAssignment(userId) {
         if (!activeLearning) {
             return null;
         }
+
+        activeLearning.availableAt = activeLearning.availableAt || activeLearning.assignedAt || new Date().toISOString();
         
         // The original function returned an object with an 'assignment' property.
         // I will replicate that structure.
@@ -358,9 +430,11 @@ class TeamsBot extends TeamsActivityHandler {
                           status: "assigned",
                           createdAt: nowIso,
                           updatedAt: nowIso,
-                          availableAt: nowIso,
+                          availableAt: computeStartTimestamp(LEARNING_START_DELAY_MINUTES),
                           module: firstModule,
-                          attempts: []
+                          attempts: [],
+                          quizAvailableAt: null,
+                          usageAvailableAt: null
                       }],
                       updatedAt: nowIso
                   };
@@ -404,15 +478,12 @@ class TeamsBot extends TeamsActivityHandler {
                 return;
             }
 
-            const completedAt = new Date(assignment.assignment.completedAt);
-            const now = new Date();
-            const diffInMinutes = (now - completedAt) / (1000 * 60);
-
-            if (diffInMinutes < 5) {
-                await context.sendActivity(
-                    `You've completed the module! Please wait for another ${Math.ceil(5 - diffInMinutes)} minute(s) before starting the quiz.`
-                );
-                return;
+            const learningEntry = await loadLearningEntry(userId, assignment.assignment.learningId);
+            const quizAvailableAt = learningEntry?.quizAvailableAt;
+            const delayMessage = buildDelayMessage("Quiz", quizAvailableAt);
+            if (delayMessage) {
+              await context.sendActivity(delayMessage);
+              return;
             }
         }
 
@@ -462,6 +533,12 @@ class TeamsBot extends TeamsActivityHandler {
         if (!assignment?.assignment) {
           await context.sendActivity("I couldn't find any learning modules for you yet.");
           return;
+        }
+
+        const startsAt = assignment.assignment.availableAt;
+        const delayMessage = buildDelayMessage("Learning", startsAt);
+        if (delayMessage) {
+          await context.sendActivity(delayMessage);
         }
 
         const card = buildLearningSummaryCard(assignment.assignment);
@@ -550,14 +627,18 @@ class TeamsBot extends TeamsActivityHandler {
       learning.status = "completed";
       learning.completedAt = new Date().toISOString();
       learning.updatedAt = learning.completedAt;
+      learning.quizAvailableAt = computeStartTimestamp(QUIZ_START_DELAY_MINUTES);
+      learning.usageAvailableAt = null;
 
       await containers.responses.items.upsert(userResponse);
 
       state.aiLearningId = learningId;
       state.aiLearningStatus = "completed";
 
+      const delayMessage = buildDelayMessage("Quiz", learning.quizAvailableAt);
       await context.sendActivity(
-        "Great! Let's jump into the quiz. Type `start quiz` when ready—passing it unlocks the next step."
+        delayMessage ||
+          "Great! Let's jump into the quiz soon. Type `start quiz` when the timer ends to unlock the next step."
       );
     } catch (error) {
       console.error("[Bot] Failed to mark learning complete", error);
@@ -622,17 +703,22 @@ class TeamsBot extends TeamsActivityHandler {
 
                 if (nextModules.length > 0) {
                     const nextModule = nextModules[0];
+                    const nextAvailableAt = computeStartTimestamp(LEARNING_START_DELAY_MINUTES);
                     userResponse.learnings.push({
                         learningId: nextModule.id,
                         status: "assigned",
                         createdAt: new Date().toISOString(),
                         updatedAt: new Date().toISOString(),
-                        availableAt: new Date(new Date().getTime() + 18 * 60 * 60 * 1000).toISOString(), // +18 hours
+                        availableAt: nextAvailableAt,
                         module: nextModule,
-                        attempts: []
+                        attempts: [],
+                        quizAvailableAt: null,
+                        usageAvailableAt: null
                     });
                     await containers.responses.items.upsert(userResponse);
-                    await context.sendActivity("🙌 Logged! I've assigned your next learning module.");
+                    const delayMsg = buildDelayMessage("Next learning", nextAvailableAt) ||
+                        "🙌 Logged! I've assigned your next learning module.";
+                    await context.sendActivity(delayMsg);
                     return; // exit after assigning
                 } else {
                     await containers.responses.items.upsert(userResponse);
@@ -643,7 +729,12 @@ class TeamsBot extends TeamsActivityHandler {
         }
         
         await containers.responses.items.upsert(userResponse);
-        await context.sendActivity("🙌 Logged! Your next learning module will be available in about an hour.");
+        const unlockAt = learning.quizPassedAt
+            ? new Date(new Date(learning.quizPassedAt).getTime() + 60 * 60 * 1000).toISOString()
+            : null;
+        const waitingMsg = buildDelayMessage("Next learning", unlockAt) ||
+            "🙌 Logged! Your next learning module will be available soon.";
+        await context.sendActivity(waitingMsg);
 
     } catch (error) {
         console.error("[Bot] Failed to submit survey", error);
@@ -728,6 +819,7 @@ class TeamsBot extends TeamsActivityHandler {
                 learning.attempts.push(result);
                 if (result.result === "passed") {
                     learning.quizPassedAt = new Date().toISOString();
+                    learning.usageAvailableAt = computeStartTimestamp(USAGE_START_DELAY_MINUTES);
                 }
                 await containers.responses.items.upsert(userResponse);
             }
