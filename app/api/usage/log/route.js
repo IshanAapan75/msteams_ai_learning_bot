@@ -4,8 +4,7 @@ import { containers } from "../../../../lib/cosmos.js";
 
 export async function POST(req) {
   const payload = await req.json();
-  const userId = payload.userId; // Assuming userId is passed in the payload for now.
-                               // In a real app, this should come from authenticated session.
+  const userId = payload.userId;
 
   if (!userId) {
     return NextResponse.json({ error: "userId is required" }, { status: 400 });
@@ -19,44 +18,56 @@ export async function POST(req) {
     }
 
     const currentLearning = userResponse.learnings.find(
-      (l) => l.status === "assigned" || (l.status === "completed" && !l.survey)
+      (l) => l.status === "completed" && !l.survey
     );
 
     if (!currentLearning) {
-      return NextResponse.json({ error: "No active or completable learning module found to log usage for." }, { status: 404 });
+      return NextResponse.json({ error: "No active and completed learning module found to log usage for." }, { status: 400 });
     }
 
-    const usageAvailableAt = currentLearning.usageAvailableAt;
-    if (usageAvailableAt) {
-      const unlockTime = new Date(usageAvailableAt).getTime();
-      if (!Number.isNaN(unlockTime) && unlockTime > Date.now()) {
-        const diffMinutes = Math.ceil((unlockTime - Date.now()) / (60 * 1000));
-        return NextResponse.json(
-          {
-            error: "Usage logging is not unlocked yet.",
-            usageAvailableAt,
-            minutesRemaining: diffMinutes,
-          },
-          { status: 403 }
-        );
-      }
-    }
+    // This check can be uncommented if a time delay is still desired.
+    // const usageAvailableAt = currentLearning.usageAvailableAt;
+    // if (usageAvailableAt) { ... }
 
-    // Update the survey data for the current learning module
+    const submittedAt = new Date();
+    const submittedAtIso = submittedAt.toISOString();
+
+    // 1. Create the new document for the 'userusage' container
+    const usageDoc = {
+      id: `${userId}-${currentLearning.learningId}-${Date.now()}`,
+      userId: userId,
+      learningId: currentLearning.learningId,
+      timestamp: submittedAtIso,
+      responses: {
+        actionType: payload.taskType,
+        timeSaved: payload.timeSaved,
+        confidence: payload.confidence,
+        notes: payload.description || payload.otherTaskDescription || null,
+      },
+      // Storing the questions text for context, similar to bot logic
+      questions: [
+        { id: "actionType", text: "What did you use AI for?" },
+        { id: "timeSaved", text: "How much time did you save?" },
+        { id: "confidence", text: "Confidence in output quality" },
+        { id: "notes", text: "Brief description" }
+      ],
+    };
+    
+    await containers.userusage.items.create(usageDoc);
+
+    // 2. Update the 'responses' container to mark as submitted
     currentLearning.survey = {
+      submittedAt: submittedAtIso,
+      // Storing a reference or minimal data is also an option
       actionType: payload.taskType,
       timeSaved: payload.timeSaved,
-      confidence: payload.confidence,
-      notes: payload.description || payload.otherTaskDescription || null,
-      submittedAt: new Date().toISOString(),
     };
-    currentLearning.updatedAt = new Date().toISOString();
-    currentLearning.usageAvailableAt = null;
+    currentLearning.updatedAt = submittedAtIso;
+    currentLearning.usageAvailableAt = null; // Prevent another submission
 
-    // Persist the updated userResponse document
     await containers.responses.items.upsert(userResponse);
 
-    return NextResponse.json({ message: "Usage logged successfully", learning: currentLearning });
+    return NextResponse.json({ message: "Usage logged successfully", usage: usageDoc });
   } catch (error) {
     console.error("[API usage log]", error);
     return NextResponse.json({ error: "Failed to log usage" }, { status: 500 });

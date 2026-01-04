@@ -4,6 +4,7 @@ const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
 const { syncLearningAssignment } = require("./lib/learningPlan.js");
 const { awardXpAction } = require("./lib/rewards.js");
+const { computeStartTimestamp } = require("./lib/utils.js");
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
 const httpFetch = (...args) =>
@@ -11,54 +12,11 @@ const httpFetch = (...args) =>
     ? fetch(...args)
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
 
-const MINUTES_TO_MS = 60 * 1000;
-const HOURS_TO_MS = 60 * MINUTES_TO_MS;
+const HOURS_TO_MS = 60 * 60 * 1000;
 const LEARNING_START_DELAY_MINUTES = Number(process.env.AI_LEARNING_START_DELAY_MINUTES ?? 5);
 const QUIZ_START_DELAY_MINUTES = Number(process.env.AI_QUIZ_START_DELAY_MINUTES ?? 20);
 const USAGE_START_DELAY_MINUTES = Number(process.env.AI_USAGE_START_DELAY_MINUTES ?? 120);
 const NEXT_LEARNING_DELAY_HOURS = Number(process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 18);
-
-function computeStartTimestamp(delayMinutes) {
-  const minutes = Number.isFinite(Number(delayMinutes)) ? Number(delayMinutes) : 0;
-  const ms = Math.max(0, minutes) * MINUTES_TO_MS;
-  return new Date(Date.now() + ms).toISOString();
-}
-
-function formatTimeRemaining(targetIso) {
-  if (!targetIso) {
-    return null;
-  }
-  const target = new Date(targetIso).getTime();
-  if (Number.isNaN(target)) {
-    return null;
-  }
-  const diffMs = target - Date.now();
-  if (diffMs <= 0) {
-    return null;
-  }
-  const totalMinutes = Math.ceil(diffMs / MINUTES_TO_MS);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  const parts = [];
-  if (hours > 0) {
-    parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
-  }
-  if (minutes > 0) {
-    parts.push(`${minutes} minute${minutes === 1 ? "" : "s"}`);
-  }
-  if (!parts.length) {
-    parts.push("less than a minute");
-  }
-  return parts.join(" and ");
-}
-
-function buildDelayMessage(activityLabel, targetIso) {
-  const remaining = formatTimeRemaining(targetIso);
-  if (!remaining) {
-    return null;
-  }
-  return `⏳ ${activityLabel} unlocks in ${remaining}. I'll remind you when it's ready.`;
-}
 
 async function loadLearningEntry(userId, learningId) {
   if (!userId || !learningId) {
@@ -310,6 +268,54 @@ function buildLanguagePreferenceCard() {
   });
 }
 
+function buildAssessmentResultsCard(score) {
+  const scoreColor =
+    score >= 80 ? "good" : score >= 60 ? "accent" : score >= 40 ? "warning" : "attention";
+  const scoreLabel =
+    score >= 80
+      ? "Advanced User"
+      : score >= 60
+      ? "Proficient User"
+      : score >= 40
+      ? "Developing User"
+      : "Beginner";
+
+  return CardFactory.adaptiveCard({
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    version: "1.4",
+    type: "AdaptiveCard",
+    body: [
+      {
+        type: "TextBlock",
+        text: "Assessment Complete! 🎉",
+        weight: "bolder",
+        size: "large",
+        horizontalAlignment: "center",
+      },
+      {
+        type: "TextBlock",
+        text: "Here's your AI Fluency profile",
+        horizontalAlignment: "center",
+        isSubtle: true,
+      },
+      {
+        type: "TextBlock",
+        text: `${score}`,
+        size: "extraLarge",
+        weight: "bolder",
+        horizontalAlignment: "center",
+        color: scoreColor,
+      },
+      {
+        type: "TextBlock",
+        text: `You are an **${scoreLabel}**`,
+        horizontalAlignment: "center",
+        spacing: "none",
+      },
+    ],
+  });
+}
+
 async function fetchAssignment(userId) {
     try {
         const querySpec = {
@@ -388,6 +394,11 @@ class TeamsBot extends TeamsActivityHandler {
         currentResponses: [],
         language: null,
         awaitingLanguage: false,
+        inAssessment: false,
+        assessmentQuestions: [],
+        assessmentQuestionIndex: 0,
+        currentAssessmentResponses: [],
+        assessmentScoringConfig: null,
       });
 
       const profile = await getUserProfile(userId);
@@ -471,6 +482,19 @@ class TeamsBot extends TeamsActivityHandler {
       state.aiLearningId = assignment?.assignment?.learningId || state.aiLearningId;
       state.aiLearningStatus = assignment?.assignment?.status || state.aiLearningStatus;
       state.aiLearningQuizzes = assignment?.assignment?.module?.quizzes || state.aiLearningQuizzes;
+
+      // Check if user has taken assessment before allowing other commands
+      const { resources: assessmentResponses } = await containers.assessmentresponse.items
+        .query({
+          query: "SELECT * FROM c WHERE c.userId = @userId",
+          parameters: [{ name: "@userId", value: userId }],
+        })
+        .fetchAll();
+
+      if (assessmentResponses.length === 0 && text !== "/assessment") {
+        await context.sendActivity("Please complete the AI Fluency Diagnostic first by typing `/assessment`.");
+        return;
+      }
 
       if (text === "start quiz") {
         const activeLearning = assignment?.assignment;
@@ -579,7 +603,7 @@ class TeamsBot extends TeamsActivityHandler {
         return;
       }
 
-      if (text === "log usage") {
+      if (text === "/logusage") {
         const activeLearning = assignment?.assignment;
         const candidateLearningId = activeLearning?.learningId || state.aiLearningId;
 
@@ -621,6 +645,55 @@ class TeamsBot extends TeamsActivityHandler {
         return;
       }
 
+      if (text === "/myusage") {
+        try {
+          const { resources: userUsages } = await containers.userusage.items
+            .query({
+              query: "SELECT * FROM c WHERE c.userId = @userId ORDER BY c.timestamp DESC",
+              parameters: [{ name: "@userId", value: userId }],
+            })
+            .fetchAll();
+
+          if (!userUsages || userUsages.length === 0) {
+            await context.sendActivity("You haven't logged any AI usage yet. Use `/logusage` to get started!");
+            return;
+          }
+
+          let responseMessage = "Here are your logged AI usages:\n\n";
+          userUsages.forEach((usage, index) => {
+            responseMessage += `**Usage Entry ${index + 1}:**\n`;
+            responseMessage += `  **Timestamp:** ${new Date(usage.timestamp).toLocaleString()}\n`;
+            responseMessage += `  **Learning ID:** ${usage.learningId || 'N/A'}\n`;
+            responseMessage += `  **What did you use AI for?** ${usage.responses.actionType || 'N/A'}\n`;
+            responseMessage += `  **How much time did you save?** ${usage.responses.timeSaved || 'N/A'}\n`;
+            responseMessage += `  **Confidence in output quality:** ${usage.responses.confidence || 'N/A'}\n`;
+            if (usage.responses.notes) {
+              responseMessage += `  **Notes:** ${usage.responses.notes}\n`;
+            }
+            responseMessage += "\n";
+          });
+
+          await context.sendActivity(responseMessage);
+
+        } catch (error) {
+          console.error("[Bot] Failed to fetch user usages", error);
+          await context.sendActivity("Sorry, I couldn't retrieve your AI usages right now.");
+        }
+        return;
+      }
+
+      if (text === "/assessment") {
+        await this.handleAssessmentCommand(context, state, userId);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
+      if (context.activity.value?.action === "submit_assessment_answer") {
+        await this.handleAssessmentAnswer(context, state, userId, context.activity.value);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
       if (context.activity.value?.action === "complete_learning") {
         const { learningId } = context.activity.value;
         await this.markLearningComplete(context, state, userId, learningId);
@@ -647,6 +720,13 @@ class TeamsBot extends TeamsActivityHandler {
         return;
       }
 
+      if (state.inAssessment) {
+        // This is a fallback if the user types instead of clicking a button.
+        // The main logic is in `handleAssessmentAnswer` which is triggered by card actions.
+        await context.sendActivity("Please use the buttons to answer the assessment question.");
+        return;
+      }
+
       if (assignment?.assignment?.canStart === false) {
         await context.sendActivity(
           "You're doing great! Next module will unlock soon. I'll remind you when it's ready."
@@ -670,6 +750,124 @@ class TeamsBot extends TeamsActivityHandler {
       }
       await next();
     });
+  }
+
+  async handleAssessmentCommand(context, state, userId) {
+    try {
+      const { resources: assessmentResponses } = await containers.assessmentresponse.items
+        .query({
+          query: "SELECT * FROM c WHERE c.userId = @userId",
+          parameters: [{ name: "@userId", value: userId }],
+        })
+        .fetchAll();
+
+      if (assessmentResponses.length > 0) {
+        const latestResponse = assessmentResponses.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+        await context.sendActivity("You have already completed the AI Fluency Diagnostic. Here are your results:");
+        const resultsCard = buildAssessmentResultsCard(latestResponse.fluencyScore);
+        await context.sendActivity({ attachments: [resultsCard] });
+        return;
+      }
+
+      const { resources: questions } = await containers.assessmentquestion.items.query("SELECT * FROM c").fetchAll();
+      if (!questions || questions.length === 0) {
+        await context.sendActivity("I couldn't find any assessment questions right now. Please try again later.");
+        return;
+      }
+
+      state.inAssessment = true;
+      state.assessmentQuestions = questions.sort((a, b) => a.id.localeCompare(b.id)); // Ensure order
+      state.assessmentQuestionIndex = 0;
+      state.currentAssessmentResponses = [];
+
+      await context.sendActivity("Starting the AI Fluency Diagnostic...");
+      await this.sendAssessmentQuestion(context, state);
+
+    } catch (error) {
+      console.error("[Bot] Failed to handle assessment command", error);
+      await context.sendActivity("Sorry, I ran into an error while trying to start the assessment.");
+    }
+  }
+
+  async sendAssessmentQuestion(context, state) {
+    const question = state.assessmentQuestions[state.assessmentQuestionIndex];
+    if (!question) {
+      await context.sendActivity("I couldn't find the next question. Let's stop the assessment for now.");
+      state.inAssessment = false;
+      return;
+    }
+
+    const card = CardFactory.adaptiveCard({
+      $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+      version: "1.4",
+      type: "AdaptiveCard",
+      body: [
+        {
+          type: "TextBlock",
+          text: `Question ${state.assessmentQuestionIndex + 1}/${state.assessmentQuestions.length}`,
+          weight: "bolder",
+        },
+        {
+          type: "TextBlock",
+          text: question.text,
+          wrap: true,
+          size: "medium",
+        },
+      ],
+      actions: question.options.map((option, index) => ({
+        type: "Action.Submit",
+        title: option,
+        data: { action: "submit_assessment_answer", answer: index },
+      })),
+    });
+
+    await context.sendActivity({ attachments: [card] });
+  }
+
+  async handleAssessmentAnswer(context, state, userId, value) {
+    const answer = value.answer;
+    if (typeof answer !== 'number') {
+        await context.sendActivity("Invalid answer format. Please select an option from the card.");
+        return;
+    }
+    
+    state.currentAssessmentResponses[state.assessmentQuestionIndex] = answer;
+    state.assessmentQuestionIndex += 1;
+
+    if (state.assessmentQuestionIndex < state.assessmentQuestions.length) {
+      await this.sendAssessmentQuestion(context, state);
+    } else {
+      await this.submitAssessment(context, state, userId);
+    }
+  }
+
+  async submitAssessment(context, state, userId) {
+    const sum = state.currentAssessmentResponses.reduce((acc, val) => acc + val, 0);
+    const maxScore = state.assessmentQuestions.length * 4; // "Strongly Agree" is index 4
+    const fluencyScore = Math.round((sum / maxScore) * 100);
+
+    const responseDoc = {
+      id: `${userId}-${Date.now()}`,
+      userId: userId,
+      timestamp: new Date().toISOString(),
+      answers: state.currentAssessmentResponses,
+      fluencyScore,
+    };
+
+    try {
+      await containers.assessmentresponse.items.create(responseDoc);
+      const resultsCard = buildAssessmentResultsCard(fluencyScore);
+      await context.sendActivity({ attachments: [resultsCard] });
+    } catch (error) {
+      console.error("[Bot] Failed to save assessment response", error);
+      await context.sendActivity("Sorry, I couldn't save your assessment results. Please try again later.");
+    } finally {
+      // Reset state
+      state.inAssessment = false;
+      state.assessmentQuestions = [];
+      state.assessmentQuestionIndex = 0;
+      state.currentAssessmentResponses = [];
+    }
   }
 
   async markLearningComplete(context, state, userId, learningId) {
@@ -724,13 +922,13 @@ class TeamsBot extends TeamsActivityHandler {
   async submitSurvey(context, state, userId, payload) {
     const { learningId } = payload;
     if (!learningId) {
-      await context.sendActivity("Missing learning reference—please try again.");
-      return;
+        await context.sendActivity("Missing learning reference—please try again.");
+        return;
     }
 
     if (!payload.actionType || !payload.timeSaved || !payload.confidence) {
-      await context.sendActivity("Please answer all required questions before submitting.");
-      return;
+        await context.sendActivity("Please answer all required questions before submitting.");
+        return;
     }
 
     try {
@@ -757,10 +955,34 @@ class TeamsBot extends TeamsActivityHandler {
             await context.sendActivity(usageDelayMessage);
             return;
         }
-        
+
         const submittedAt = new Date();
         const submittedAtIso = submittedAt.toISOString();
 
+        // Create the new usage document
+        const usageDoc = {
+            id: `${userId}-${learningId}-${Date.now()}`,
+            userId: userId,
+            learningId: learningId,
+            timestamp: submittedAtIso,
+            questions: [
+                { id: "actionType", text: "What did you use AI for?" },
+                { id: "timeSaved", text: "How much time did you save?" },
+                { id: "confidence", text: "Confidence in output quality" },
+                { id: "notes", text: "Brief description" }
+            ],
+            responses: {
+                actionType: payload.actionType,
+                timeSaved: payload.timeSaved,
+                confidence: payload.confidence,
+                notes: payload.notes || null
+            }
+        };
+
+        // Save to the new container
+        await containers.userusage.items.create(usageDoc);
+        
+        // Mark survey as submitted in the original responses document
         learning.survey = {
             actionType: payload.actionType,
             timeSaved: payload.timeSaved,
@@ -853,12 +1075,6 @@ class TeamsBot extends TeamsActivityHandler {
     await this.submitQuizAttempt(context, state, userId);
     await this.moveToNextQuiz(context, state);
 
-    if (!state.inQuiz) {
-      const card = buildSurveyCard(state.aiLearningId);
-      await context.sendActivity({
-        attachments: [card],
-      });
-    }
   }
 
   async submitQuizAttempt(context, state, userId) {
