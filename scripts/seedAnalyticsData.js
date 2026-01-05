@@ -43,6 +43,9 @@ const CONTAINERS = [
   "questions",
   "rewards",
   "conversations",
+  "userusage",
+  "assessmentquestion",
+  "assessmentresponse",
 ];
 
 const now = new Date();
@@ -451,6 +454,82 @@ const sampleConversations = [
   },
 ];
 
+const sampleAssessmentQuestions = [
+  {
+    id: 'scoring_config',
+    sectionWeights: {
+      foundational: { weight: 50, questions: ['q1', 'q2', 'q3', 'q4'] },
+      applied: { weight: 50, questions: ['q5', 'q6', 'q7', 'q8'] }
+    },
+    fluencyLevels: [
+      { label: 'Beginner', range: [0, 40] },
+      { label: 'Intermediate', range: [41, 75] },
+      { label: 'Advanced', range: [76, 100] }
+    ]
+  },
+  {
+    id: 'q1',
+    type: 'mcq',
+    text: "What is the primary benefit of using a 'persona' in a prompt?",
+    options: [
+      { text: "It makes the AI's response longer." },
+      { text: "It helps the AI adopt a specific tone, style, and expertise." },
+      { text: "It guarantees a factual and correct answer." },
+      { text: "It allows the AI to access personal user data." }
+    ],
+    correctAnswerIndex: 1
+  },
+  {
+    id: 'q2',
+    type: 'mcq',
+    text: "Which of the following is a key principle of 'Responsible AI'?",
+    options: [
+      { text: "Maximizing the AI's creativity at all costs." },
+      { text: "Ensuring the AI's operations are transparent and understandable." },
+      { text: "Using AI to automate all human jobs." },
+      { text: "Keeping the AI's decision-making process secret." }
+    ],
+    correctAnswerIndex: 1
+  },
+  {
+    id: 'q9',
+    type: 'self_assessment',
+    text: "How confident are you in the quality and reliability of the AI's output for your daily tasks?",
+    options: [
+      { value: 'low', text: "Low - I often have to rework or discard the results.", score: 10 },
+      { value: 'medium', text: "Medium - It's a good starting point, but requires significant editing.", score: 20 },
+      { value: 'high', text: "High - It's mostly accurate and useful with minor tweaks.", score: 30 }
+    ]
+  },
+  {
+    id: 'q10',
+    type: 'usage_frequency',
+    text: "How often do you use AI tools in your work?",
+    options: [
+      { value: 'daily', text: "Daily", score: 30 },
+      { value: 'weekly', text: "A few times a week", score: 20 },
+      { value: 'monthly', text: "A few times a month", score: 10 },
+      { value: 'rarely', text: "Rarely or never", score: 0 }
+    ]
+  }
+];
+
+const sampleAssessmentResponses = [
+    {
+        id: `user-alex-${Date.now()}`,
+        userId: "user-alex",
+        timestamp: isoNow,
+        answers: [
+            { questionId: 'q1', answer: 1 },
+            { questionId: 'q2', answer: 1 },
+            { questionId: 'q9', answer: 'high' },
+            { questionId: 'q10', answer: 'daily' }
+        ],
+        fluencyScore: 85,
+        fluencyLevel: "Advanced",
+    }
+];
+
 const seedData = {
   users: sampleUsers,
   teams: sampleTeams,
@@ -461,6 +540,8 @@ const seedData = {
   questions: sampleQuestions,
   rewards: sampleRewards,
   conversations: sampleConversations,
+  assessmentquestion: sampleAssessmentQuestions,
+  assessmentresponse: sampleAssessmentResponses,
 };
 
 async function ensureContainers(database) {
