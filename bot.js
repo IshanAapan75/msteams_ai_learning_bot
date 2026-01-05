@@ -13,9 +13,15 @@ const httpFetch = (...args) =>
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
 
 const HOURS_TO_MS = 60 * 60 * 1000;
-const LEARNING_START_DELAY_MINUTES = Number(process.env.AI_LEARNING_START_DELAY_MINUTES ?? 5);
-const USAGE_START_DELAY_MINUTES = Number(process.env.AI_USAGE_START_DELAY_MINUTES ?? 120);
-const NEXT_LEARNING_DELAY_HOURS = Number(process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 18);
+const LEARNING_START_DELAY_MINUTES = Number(
+  process.env.MICRO_LEARNING_START_DELAY_MINUTES ?? process.env.AI_LEARNING_START_DELAY_MINUTES ?? 0
+);
+const USAGE_START_DELAY_MINUTES = Number(
+  process.env.MICRO_USAGE_START_DELAY_MINUTES ?? process.env.AI_USAGE_START_DELAY_MINUTES ?? 0
+);
+const NEXT_LEARNING_DELAY_HOURS = Number(
+  process.env.MICRO_LEARNING_NEXT_DELAY_HOURS ?? process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 24
+);
 const DEFAULT_LANGUAGE = "English";
 
 async function loadLearningEntry(userId, learningId) {
@@ -38,6 +44,37 @@ async function loadLearningEntry(userId, learningId) {
     console.error("[Bot] Failed to load learning entry", error);
     return null;
   }
+}
+
+
+
+function buildDelayMessage(label, timestampIso) {
+  if (!timestampIso) {
+    return null;
+  }
+
+  const target = new Date(timestampIso);
+  if (Number.isNaN(target.getTime())) {
+    return null;
+  }
+
+  const remainingMs = target.getTime() - Date.now();
+  if (remainingMs <= 0) {
+    return null;
+  }
+
+  const totalMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+  if (hours > 0) {
+    parts.push(`${hours}h`);
+  }
+  if (minutes > 0 || parts.length === 0) {
+    parts.push(`${minutes}m`);
+  }
+  const relative = parts.join(" ");
+  return `⏳ ${label} unlocks in ${relative} (at ${target.toLocaleString()}). I'll remind you when it's ready.`;
 }
 
 function buildLearningSummaryCard(assignment) {
@@ -623,6 +660,12 @@ class TeamsBot extends TeamsActivityHandler {
         return;
       }
 
+      if (context.activity.value?.action === "submit_full_assessment") {
+        await this.handleFullAssessmentSubmission(context, state, userId, context.activity.value);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
       if (context.activity.value?.action === "submit_assessment_answer") {
         await this.handleAssessmentAnswer(context, state, userId, context.activity.value);
         await this.conversationState.saveChanges(context);
@@ -659,6 +702,28 @@ class TeamsBot extends TeamsActivityHandler {
         // This is a fallback if the user types instead of clicking a button.
         // The main logic is in `handleAssessmentAnswer` which is triggered by card actions.
         await context.sendActivity("Please use the buttons to answer the assessment question.");
+        return;
+      }
+
+      if (text === "hi") {
+        const { assignment, status } = await syncLearningAssignment(userId);
+
+        if (status === "completed") {
+          await context.sendActivity("You have completed all available learning modules. Great job!");
+        } else if (assignment) {
+          const startsAt = assignment.availableAt;
+          const delayMessage = buildDelayMessage("Next learning", startsAt);
+          if (delayMessage) {
+            await context.sendActivity(delayMessage);
+          } else {
+            const card = buildLearningSummaryCard(assignment);
+            if (card) {
+              await context.sendActivity({ attachments: [card] });
+            }
+          }
+        } else {
+          await context.sendActivity("I couldn't find any learning modules for you yet.");
+        }
         return;
       }
 
@@ -777,6 +842,52 @@ class TeamsBot extends TeamsActivityHandler {
     } catch (error) {
       console.error("[Bot] Failed to handle assessment command", error);
       await context.sendActivity("Sorry, I ran into an error while trying to start the assessment.");
+    }
+  }
+
+  async handleFullAssessmentSubmission(context, state, userId, value) {
+    try {
+      const { resources: scoringConfig } = await containers.assessmentquestion.items.query("SELECT * FROM c WHERE c.id = 'scoring_config'").fetchAll();
+      const scoring = scoringConfig[0];
+
+      let score = 0;
+      const responses = [];
+      for (const key in value) {
+        if (key.startsWith("assessment_")) {
+          const questionId = key.replace("assessment_", "");
+          const question = state.assessmentQuestions.find(q => q.id === questionId);
+          if (question) {
+            const answerIndex = parseInt(value[key], 10);
+            const answer = question.options[answerIndex];
+            const isCorrect = answer === question.correctAnswer;
+            const questionScore = isCorrect ? (scoring.scores[question.fluency_level] || 0) : 0;
+            score += questionScore;
+            responses.push({
+              questionId: questionId,
+              answer: answer,
+              isCorrect: isCorrect,
+              score: questionScore
+            });
+          }
+        }
+      }
+
+      const assessmentResponse = {
+        id: `${userId}-${new Date().getTime()}`,
+        userId: userId,
+        responses: responses,
+        fluencyScore: score,
+        timestamp: new Date().toISOString()
+      };
+
+      await containers.assessmentresponse.items.create(assessmentResponse);
+
+      const resultsCard = buildAssessmentResultsCard(score);
+      await context.sendActivity({ attachments: [resultsCard] });
+
+    } catch (error) {
+      console.error("[Bot] Failed to handle full assessment submission", error);
+      await context.sendActivity("Sorry, I ran into an error while trying to submit your assessment.");
     }
   }
 
