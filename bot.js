@@ -14,9 +14,9 @@ const httpFetch = (...args) =>
 
 const HOURS_TO_MS = 60 * 60 * 1000;
 const LEARNING_START_DELAY_MINUTES = Number(process.env.AI_LEARNING_START_DELAY_MINUTES ?? 5);
-const QUIZ_START_DELAY_MINUTES = Number(process.env.AI_QUIZ_START_DELAY_MINUTES ?? 20);
 const USAGE_START_DELAY_MINUTES = Number(process.env.AI_USAGE_START_DELAY_MINUTES ?? 120);
 const NEXT_LEARNING_DELAY_HOURS = Number(process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 18);
+const DEFAULT_LANGUAGE = "English";
 
 async function loadLearningEntry(userId, learningId) {
   if (!userId || !learningId) {
@@ -39,21 +39,6 @@ async function loadLearningEntry(userId, learningId) {
     return null;
   }
 }
-
-const LANGUAGE_CHOICES = [
-  "English",
-  "Spanish",
-  "French",
-  "German",
-  "Japanese",
-  "Hindi",
-  "Portuguese",
-  "Chinese",
-  "Korean",
-  "Italian",
-  "Arabic",
-  "Other",
-];
 
 function buildLearningSummaryCard(assignment) {
   if (!assignment?.module) {
@@ -232,42 +217,6 @@ function buildSurveyCard(learningId) {
   });
 }
 
-function buildLanguagePreferenceCard() {
-  return CardFactory.adaptiveCard({
-    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-    version: "1.4",
-    type: "AdaptiveCard",
-    body: [
-      {
-        type: "TextBlock",
-        text: "🌐 Choose your preferred language",
-        weight: "bolder",
-        size: "medium",
-      },
-      {
-        type: "TextBlock",
-        text: "We'll personalize your experience based on this selection.",
-        isSubtle: true,
-        wrap: true,
-        spacing: "small",
-      },
-      {
-        type: "Input.ChoiceSet",
-        id: "language",
-        style: "expanded",
-        choices: LANGUAGE_CHOICES.map((label) => ({ title: label, value: label })),
-      },
-    ],
-    actions: [
-      {
-        type: "Action.Submit",
-        title: "Save preference",
-        data: { action: "set_language" },
-      },
-    ],
-  });
-}
-
 function buildAssessmentResultsCard(score) {
   const scoreColor =
     score >= 80 ? "good" : score >= 60 ? "accent" : score >= 40 ? "warning" : "attention";
@@ -311,6 +260,68 @@ function buildAssessmentResultsCard(score) {
         text: `You are an **${scoreLabel}**`,
         horizontalAlignment: "center",
         spacing: "none",
+      },
+    ],
+  });
+}
+
+function buildAssessmentInputSection(question) {
+  const base = [
+    {
+      type: "TextBlock",
+      text: question.text,
+      wrap: true,
+      weight: "bolder",
+      spacing: "medium",
+    },
+  ];
+
+  const isObjectOptions = question.options?.length && typeof question.options[0] === "object";
+  const choices = (question.options || []).map((option, index) =>
+    typeof option === "string"
+      ? { title: option, value: String(index) }
+      : { title: option.text, value: String(option.value) }
+  );
+
+  base.push({
+    type: "Input.ChoiceSet",
+    id: `assessment_${question.id}`,
+    style: "expanded",
+    isRequired: true,
+    errorMessage: "Please select an option",
+    choices,
+  });
+
+  return base;
+}
+
+function buildFullAssessmentCard(questions = []) {
+  const sections = questions.flatMap((question) => buildAssessmentInputSection(question));
+
+  return CardFactory.adaptiveCard({
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    version: "1.4",
+    type: "AdaptiveCard",
+    body: [
+      {
+        type: "TextBlock",
+        text: "🧠 AI Fluency Diagnostic",
+        weight: "bolder",
+        size: "large",
+      },
+      {
+        type: "TextBlock",
+        text: "Answer all questions below to unlock your personalized learning plan.",
+        isSubtle: true,
+        wrap: true,
+      },
+      ...sections,
+    ],
+    actions: [
+      {
+        type: "Action.Submit",
+        title: "Submit assessment",
+        data: { action: "submit_full_assessment" },
       },
     ],
   });
@@ -386,102 +397,39 @@ class TeamsBot extends TeamsActivityHandler {
 
       const state = await this.quizState.get(context, {
         inQuiz: false,
-        aiLearningId: null,
-        aiLearningStatus: "assigned",
-        aiLearningQuizzes: [],
+        microLearningId: null,
+        microLearningStatus: "assigned",
+        microLearningQuizzes: [],
         currentQuiz: null,
         questionIndex: 0,
         currentResponses: [],
-        language: null,
-        awaitingLanguage: false,
-        inAssessment: false,
+        language: DEFAULT_LANGUAGE,
         assessmentQuestions: [],
-        assessmentQuestionIndex: 0,
-        currentAssessmentResponses: [],
         assessmentScoringConfig: null,
       });
 
       const profile = await getUserProfile(userId);
       if (profile) {
         state.language = state.language || profile.language || null;
-        state.aiLearningId = state.aiLearningId || profile.lastCompletedLearningId || null;
-      }
-
-      if (context.activity.value?.action === "set_language") {
-        const selectedLanguage = context.activity.value.language;
-        if (!selectedLanguage) {
-          await context.sendActivity("Please choose a language from the list.");
-          return;
-        }
-        try {
-          await updateUserLanguage(userId, selectedLanguage);
-          state.language = selectedLanguage;
-          state.awaitingLanguage = false;
-          await context.sendActivity(`✅ Saved **${selectedLanguage}** as your language preference.`);
-
-          // Check if user has a response document
-          const querySpecUser = {
-              query: "SELECT * FROM c WHERE c.userId = @userId",
-              parameters: [{ name: "@userId", value: userId }]
-          };
-          const { resources: userResponses } = await containers.responses.items.query(querySpecUser).fetchAll();
-      
-          if (!userResponses || userResponses.length === 0) {
-              // First time user, assign first learning module
-              const querySpecModule = {
-                  query: "SELECT * FROM c WHERE c[\"order\"] = 1"
-              };
-              const { resources: learningModules } = await containers.ai_learning.items.query(querySpecModule).fetchAll();
-      
-              if (learningModules.length > 0) {
-                  const firstModule = learningModules[0];
-                  const nowIso = new Date().toISOString();
-                  const newResponse = {
-                      id: `${userId}-${Date.now()}`,
-                      userId: userId,
-                      learnings: [{
-                          learningId: firstModule.id,
-                          status: "assigned",
-                          createdAt: nowIso,
-                          updatedAt: nowIso,
-                          availableAt: computeStartTimestamp(LEARNING_START_DELAY_MINUTES),
-                          module: firstModule,
-                          attempts: [],
-                          quizAvailableAt: null,
-                          usageAvailableAt: null
-                      }],
-                      updatedAt: nowIso
-                  };
-                  await containers.responses.items.create(newResponse);
-                  await context.sendActivity(
-                    `📘 I've assigned **${firstModule.title || firstModule.topic || "your first learning"}**. Type \`/learning\` to open it.`
-                  );
-              }
-          }
-        } catch (error) {
-          console.error("[Bot] Failed to update language", error);
-          await context.sendActivity("I couldn't save that preference. Please try again.");
-          return;
-        }
+        state.microLearningId = state.microLearningId || profile.lastCompletedLearningId || null;
       }
 
       if (!state.language) {
-        if (!state.awaitingLanguage) {
-          const card = buildLanguagePreferenceCard();
-          await context.sendActivity({ attachments: [card] });
-          state.awaitingLanguage = true;
-        } else {
-          await context.sendActivity("Please pick a language to continue.");
-        }
-        await this.conversationState.saveChanges(context);
-        return;
+        state.language = DEFAULT_LANGUAGE;
+        await updateUserLanguage(userId, DEFAULT_LANGUAGE).catch((error) =>
+          console.warn("[Bot] Unable to persist default language", error)
+        );
+        await context.sendActivity(
+          "🌐 I've set your language preference to English so you can start learning right away. You can change this later from the dashboard."
+        );
       }
 
-      state.awaitingLanguage = false;
+      await this.assignFirstLearningModule(context, userId);
+
       const assignment = await fetchAssignment(userId);
-      state.aiLearningId = assignment?.assignment?.learningId || state.aiLearningId;
-      state.aiLearningStatus = assignment?.assignment?.status || state.aiLearningStatus;
-      state.aiLearningQuizzes = assignment?.assignment?.module?.quizzes || state.aiLearningQuizzes;
+      state.microLearningId = assignment?.assignment?.learningId || state.microLearningId;
+      state.microLearningStatus = assignment?.assignment?.status || state.microLearningStatus;
+      state.microLearningQuizzes = assignment?.assignment?.module?.quizzes || state.microLearningQuizzes;
 
       // Check if user has taken assessment before allowing other commands
       const { resources: assessmentResponses } = await containers.assessmentresponse.items
@@ -506,8 +454,8 @@ class TeamsBot extends TeamsActivityHandler {
           return;
         }
 
-        const candidateLearningId = activeLearning?.learningId || state.aiLearningId;
-        const candidateStatus = activeLearning?.status || state.aiLearningStatus;
+        const candidateLearningId = activeLearning?.learningId || state.microLearningId;
+        const candidateStatus = activeLearning?.status || state.microLearningStatus;
 
         let learningEntry = null;
         if (candidateLearningId) {
@@ -529,24 +477,17 @@ class TeamsBot extends TeamsActivityHandler {
           return;
         }
 
-        const quizAvailableAt = learningEntry?.quizAvailableAt;
-        const delayMessage = buildDelayMessage("Quiz", quizAvailableAt);
-        if (delayMessage) {
-          await context.sendActivity(delayMessage);
-          return;
-        }
-
         const derivedLearningId = learningEntry.learningId || candidateLearningId;
-        const derivedQuizzes = activeLearning?.module?.quizzes || learningEntry?.module?.quizzes || state.aiLearningQuizzes;
+        const derivedQuizzes = activeLearning?.module?.quizzes || learningEntry?.module?.quizzes || state.microLearningQuizzes;
 
-        state.aiLearningId = derivedLearningId || state.aiLearningId;
-        state.aiLearningQuizzes = derivedQuizzes || state.aiLearningQuizzes;
+        state.microLearningId = derivedLearningId || state.microLearningId;
+        state.microLearningQuizzes = derivedQuizzes || state.microLearningQuizzes;
 
         const quizPayload = {
           userId,
           fetchAll: true,
-          aiLearningId: state.aiLearningId,
-          aiLearningQuizzes: state.aiLearningQuizzes,
+          microLearningId: state.microLearningId,
+          microLearningQuizzes: state.microLearningQuizzes,
         };
 
         const res = await httpFetch(`${appUrl}/api/quiz/assign`, {
@@ -573,8 +514,8 @@ class TeamsBot extends TeamsActivityHandler {
         state.currentQuiz = data.quizzes[0];
         state.questionIndex = 0;
         state.currentResponses = [];
-        state.aiLearningId = data.aiLearningId;
-        state.aiLearningStatus = data.aiLearningStatus;
+        state.microLearningId = data.microLearningId;
+        state.microLearningStatus = data.microLearningStatus;
 
         await context.sendActivity(
           `🎯 Starting quiz for ${state.currentQuiz.title}. Answer each question to proceed.`
@@ -605,7 +546,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       if (text === "/logusage") {
         const activeLearning = assignment?.assignment;
-        const candidateLearningId = activeLearning?.learningId || state.aiLearningId;
+        const candidateLearningId = activeLearning?.learningId || state.microLearningId;
 
         if (!candidateLearningId) {
           await context.sendActivity(
@@ -631,12 +572,6 @@ class TeamsBot extends TeamsActivityHandler {
 
         if (learningEntry.survey?.submittedAt) {
           await context.sendActivity("You've already logged a usage win for this module. Great job!");
-          return;
-        }
-
-        const usageDelayMessage = buildDelayMessage("Usage logging", learningEntry.usageAvailableAt);
-        if (usageDelayMessage) {
-          await context.sendActivity(usageDelayMessage);
           return;
         }
 
@@ -744,12 +679,69 @@ class TeamsBot extends TeamsActivityHandler {
           await this.ensureUserExists(context, member.id, member.name);
           const displayName = member?.name || member?.givenName || context.activity.from?.name || "there";
           await context.sendActivity(
-            `👋 **Welcome to AI Champions Bot, ${displayName}!**\nI'll assign your first AI learning shortly.`
+            `👋 **Welcome to AI Champions Bot, ${displayName}!**\nI'll assign your first microlearning shortly.`
           );
         }
       }
       await next();
     });
+  }
+
+  async assignFirstLearningModule(context, userId) {
+    if (!userId) {
+      return false;
+    }
+
+    try {
+      const { resources: userResponses } = await containers.responses.items
+        .query({
+          query: "SELECT * FROM c WHERE c.userId = @userId",
+          parameters: [{ name: "@userId", value: userId }],
+        })
+        .fetchAll();
+
+      if (userResponses && userResponses.length > 0) {
+        return false;
+      }
+
+      const { resources: learningModules } = await containers.ai_learning.items
+        .query({ query: "SELECT * FROM c WHERE c[\"order\"] = 1" })
+        .fetchAll();
+
+      if (!learningModules || learningModules.length === 0) {
+        return false;
+      }
+
+      const firstModule = learningModules[0];
+      const nowIso = new Date().toISOString();
+      const newResponse = {
+        id: `${userId}-${Date.now()}`,
+        userId,
+        learnings: [
+          {
+            learningId: firstModule.id,
+            status: "assigned",
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            availableAt: computeStartTimestamp(LEARNING_START_DELAY_MINUTES),
+            module: firstModule,
+            attempts: [],
+            quizAvailableAt: null,
+            usageAvailableAt: null,
+          },
+        ],
+        updatedAt: nowIso,
+      };
+
+      await containers.responses.items.create(newResponse);
+      await context.sendActivity(
+        `📘 I've assigned **${firstModule.title || firstModule.topic || "your first learning"}**. Type \`/learning\` to open it.`
+      );
+      return true;
+    } catch (error) {
+      console.error("[Bot] Failed to assign first learning module", error);
+      return false;
+    }
   }
 
   async handleAssessmentCommand(context, state, userId) {
@@ -775,98 +767,16 @@ class TeamsBot extends TeamsActivityHandler {
         return;
       }
 
-      state.inAssessment = true;
-      state.assessmentQuestions = questions.sort((a, b) => a.id.localeCompare(b.id)); // Ensure order
-      state.assessmentQuestionIndex = 0;
-      state.currentAssessmentResponses = [];
+      state.assessmentQuestions = questions
+        .filter((item) => item.id !== "scoring_config")
+        .sort((a, b) => a.id.localeCompare(b.id));
 
-      await context.sendActivity("Starting the AI Fluency Diagnostic...");
-      await this.sendAssessmentQuestion(context, state);
+      const assessmentCard = buildFullAssessmentCard(state.assessmentQuestions);
+      await context.sendActivity({ attachments: [assessmentCard] });
 
     } catch (error) {
       console.error("[Bot] Failed to handle assessment command", error);
       await context.sendActivity("Sorry, I ran into an error while trying to start the assessment.");
-    }
-  }
-
-  async sendAssessmentQuestion(context, state) {
-    const question = state.assessmentQuestions[state.assessmentQuestionIndex];
-    if (!question) {
-      await context.sendActivity("I couldn't find the next question. Let's stop the assessment for now.");
-      state.inAssessment = false;
-      return;
-    }
-
-    const card = CardFactory.adaptiveCard({
-      $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-      version: "1.4",
-      type: "AdaptiveCard",
-      body: [
-        {
-          type: "TextBlock",
-          text: `Question ${state.assessmentQuestionIndex + 1}/${state.assessmentQuestions.length}`,
-          weight: "bolder",
-        },
-        {
-          type: "TextBlock",
-          text: question.text,
-          wrap: true,
-          size: "medium",
-        },
-      ],
-      actions: question.options.map((option, index) => ({
-        type: "Action.Submit",
-        title: option,
-        data: { action: "submit_assessment_answer", answer: index },
-      })),
-    });
-
-    await context.sendActivity({ attachments: [card] });
-  }
-
-  async handleAssessmentAnswer(context, state, userId, value) {
-    const answer = value.answer;
-    if (typeof answer !== 'number') {
-        await context.sendActivity("Invalid answer format. Please select an option from the card.");
-        return;
-    }
-    
-    state.currentAssessmentResponses[state.assessmentQuestionIndex] = answer;
-    state.assessmentQuestionIndex += 1;
-
-    if (state.assessmentQuestionIndex < state.assessmentQuestions.length) {
-      await this.sendAssessmentQuestion(context, state);
-    } else {
-      await this.submitAssessment(context, state, userId);
-    }
-  }
-
-  async submitAssessment(context, state, userId) {
-    const sum = state.currentAssessmentResponses.reduce((acc, val) => acc + val, 0);
-    const maxScore = state.assessmentQuestions.length * 4; // "Strongly Agree" is index 4
-    const fluencyScore = Math.round((sum / maxScore) * 100);
-
-    const responseDoc = {
-      id: `${userId}-${Date.now()}`,
-      userId: userId,
-      timestamp: new Date().toISOString(),
-      answers: state.currentAssessmentResponses,
-      fluencyScore,
-    };
-
-    try {
-      await containers.assessmentresponse.items.create(responseDoc);
-      const resultsCard = buildAssessmentResultsCard(fluencyScore);
-      await context.sendActivity({ attachments: [resultsCard] });
-    } catch (error) {
-      console.error("[Bot] Failed to save assessment response", error);
-      await context.sendActivity("Sorry, I couldn't save your assessment results. Please try again later.");
-    } finally {
-      // Reset state
-      state.inAssessment = false;
-      state.assessmentQuestions = [];
-      state.assessmentQuestionIndex = 0;
-      state.currentAssessmentResponses = [];
     }
   }
 
@@ -898,20 +808,18 @@ class TeamsBot extends TeamsActivityHandler {
       learning.status = "completed";
       learning.completedAt = new Date().toISOString();
       learning.updatedAt = learning.completedAt;
-      learning.quizAvailableAt = computeStartTimestamp(QUIZ_START_DELAY_MINUTES);
+      learning.quizAvailableAt = null;
       learning.usageAvailableAt = null;
 
       await containers.responses.items.upsert(userResponse);
 
       await this.awardLearningCompletion(userId, learningId);
 
-      state.aiLearningId = learningId;
-      state.aiLearningStatus = "completed";
+      state.microLearningId = learningId;
+      state.microLearningStatus = "completed";
 
-      const delayMessage = buildDelayMessage("Quiz", learning.quizAvailableAt);
       await context.sendActivity(
-        delayMessage ||
-          "Great! Let's jump into the quiz soon. Type `start quiz` when the timer ends to unlock the next step."
+        "✅ Learning marked complete! You can start the quiz right away by typing `start quiz`."
       );
     } catch (error) {
       console.error("[Bot] Failed to mark learning complete", error);
@@ -1019,9 +927,9 @@ class TeamsBot extends TeamsActivityHandler {
                     usageAvailableAt: null,
                 };
                 userResponse.learnings.push(nextLearningEntry);
-                state.aiLearningId = nextLearningEntry.learningId;
-                state.aiLearningStatus = nextLearningEntry.status;
-                state.aiLearningQuizzes = Array.isArray(nextModule.quizzes) ? nextModule.quizzes : [];
+                state.microLearningId = nextLearningEntry.learningId;
+                state.microLearningStatus = nextLearningEntry.status;
+                state.microLearningQuizzes = Array.isArray(nextModule.quizzes) ? nextModule.quizzes : [];
                 nextAssignmentMessage =
                     buildDelayMessage("Next learning", nextAvailableAt) ||
                     "🙌 Logged! I've assigned your next learning module.";
@@ -1092,8 +1000,8 @@ class TeamsBot extends TeamsActivityHandler {
           userId,
           quizId: state.currentQuiz.id,
           answers: state.currentResponses,
-          aiLearningId: state.aiLearningId,
-          aiLearningStatus: state.aiLearningStatus,
+          microLearningId: state.microLearningId,
+          microLearningStatus: state.microLearningStatus,
         }),
       });
 
@@ -1114,7 +1022,7 @@ class TeamsBot extends TeamsActivityHandler {
 
         if (userResponses.length > 0) {
             const userResponse = userResponses[0];
-            const learning = userResponse.learnings.find(l => l.learningId === state.aiLearningId);
+            const learning = userResponse.learnings.find(l => l.learningId === state.microLearningId);
             if (learning) {
                 learning.attempts = learning.attempts || [];
                 learning.attempts.push(result);

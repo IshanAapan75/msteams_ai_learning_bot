@@ -40,9 +40,13 @@ async function populateQuestions(quiz) {
 
 export async function POST(req) {
   try {
-    const { userId, fetchAll, aiLearningId, aiLearningQuizzes } = await req.json();
+    const body = await req.json();
+    const userId = body.userId;
+    const fetchAll = body.fetchAll;
+    const microLearningId = body.microLearningId ?? body.aiLearningId ?? null;
+    const microLearningQuizzes = body.microLearningQuizzes ?? body.aiLearningQuizzes ?? [];
     console.log(
-      `[API/quiz/assign] Request for userId: ${userId}, fetchAll: ${fetchAll}, aiLearningId: ${aiLearningId}`
+      `[API/quiz/assign] Request for userId: ${userId}, fetchAll: ${fetchAll}, microLearningId: ${microLearningId}`
     );
 
     if (!userId) {
@@ -52,15 +56,15 @@ export async function POST(req) {
     await ensureUserHasProfile(userId);
     const progressDoc = await fetchResponseProgress(userId);
 
-    const { resources: learningRecords } = await containers.ai_learning.items
+    const { resources: learningRecords } = await containers.micro_learning.items
       .query({
         query: "SELECT * FROM c WHERE c.userId = @userId",
         parameters: [{ name: "@userId", value: userId }],
       })
       .fetchAll();
 
-    const manualQuizList = Array.isArray(aiLearningQuizzes) ? aiLearningQuizzes.filter(Boolean) : [];
-    let effectiveLearningId = aiLearningId;
+    const manualQuizList = Array.isArray(microLearningQuizzes) ? microLearningQuizzes.filter(Boolean) : [];
+    let effectiveLearningId = microLearningId;
 
     if (!effectiveLearningId && Array.isArray(progressDoc.learnings)) {
       const lastCompleted = progressDoc.learnings.find((entry) => entry.status === "completed");
@@ -108,8 +112,8 @@ export async function POST(req) {
       const assignment = await syncLearningAssignment(userId);
       return NextResponse.json(
         {
-          error: "Complete the AI learning module before taking quizzes.",
-          aiLearningStatus: targetLearning?.status || assignment.status || "not started",
+          error: "Complete the microlearning module before taking quizzes.",
+          microLearningStatus: targetLearning?.status || assignment.status || "not started",
           assignment,
         },
         { status: 403 }
@@ -152,7 +156,7 @@ export async function POST(req) {
     if (Array.isArray(targetQuizIds) && targetQuizIds.length > 0) {
       filteredQuizzes = quizzes.filter((quiz) => targetQuizIds.includes(quiz.id));
       console.log(
-        `[API/quiz/assign] Filtered quizzes by AI learning ${effectiveLearningId}. Result count: ${filteredQuizzes.length}`
+        `[API/quiz/assign] Filtered quizzes by microlearning ${effectiveLearningId}. Result count: ${filteredQuizzes.length}`
       );
     }
 
@@ -160,7 +164,7 @@ export async function POST(req) {
       return NextResponse.json(
         {
           error: "No quizzes are linked to the completed learning module.",
-          aiLearningId: effectiveLearningId,
+          microLearningId: effectiveLearningId,
         },
         { status: 404 }
       );
@@ -188,8 +192,8 @@ export async function POST(req) {
 
     return NextResponse.json({
       quizzes: populatedQuizzes,
-      aiLearningId: effectiveLearningId,
-      aiLearningStatus: targetLearning.status || "completed",
+      microLearningId: effectiveLearningId,
+      microLearningStatus: targetLearning.status || "completed",
     });
   } catch (error) {
     console.error(`[API/quiz/assign] Error processing request: ${error.message}`);

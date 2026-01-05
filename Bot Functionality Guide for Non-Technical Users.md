@@ -22,9 +22,9 @@ Here are some key commands you'll use:
 
 The bot guides you through a structured path to AI fluency. Here’s how your journey unfolds:
 
-### 1. Getting Started: Choosing Your Language
-*   **Your First Interaction:** When you first start chatting with the bot, it will ask for your preferred language. This is a crucial first step!
-*   **Your First Learning Module:** Once you select your language, the bot automatically assigns your very first AI learning module. This module is immediately available for you to start exploring.
+### 1. Getting Started: Language Defaults to English
+*   **Your First Interaction:** The bot now starts you off in English automatically, so you can begin learning right away. You can change this later from your dashboard if needed.
+*   **Your First Learning Module:** As soon as you start chatting, the bot assigns your very first AI learning module. This module is immediately available for you to start exploring.
 
 ### 2. AI Learning Modules: Short Lessons for Big Impact
 *   **What They Are:** These are short, focused lessons on key AI topics, designed to fit easily into your busy day. Each module helps you understand different aspects of AI and how to apply them.
@@ -81,8 +81,8 @@ The AI Champions Bot rewards your dedication and progress with a fun and motivat
 
 Here's a closer look at your core interactions with the bot and what you gain:
 
-1.  **Activity: Language Selection**
-    *   **Explanation:** When you first set your preferred language with the bot.
+1.  **Activity: First-Time Setup (Automatic Language)**
+    *   **Explanation:** When you first message the bot, it automatically sets your language to English so you can start instantly. You can adjust this later from the dashboard.
     *   **Reward:** You immediately get your *first AI learning module assigned*. This module is available for you to start right away, with no initial waiting period.
 
 2.  **Activity: Completing a Learning Module**

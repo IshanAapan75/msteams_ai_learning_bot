@@ -7,14 +7,14 @@ import { recordSurveyAndAssignNext, syncLearningAssignment } from "../../../lib/
 
 export const dynamic = "force-dynamic";
 
-async function upsertResponseStatus({ userId, aiLearningId, status, quizzes = [] }) {
-  if (!userId || !aiLearningId) {
+async function upsertResponseStatus({ userId, microLearningId, status, quizzes = [] }) {
+  if (!userId || !microLearningId) {
     return;
   }
 
   await upsertLearningEntry({
     userId,
-    learningId: aiLearningId,
+    learningId: microLearningId,
     status,
     quizIds: quizzes,
   });
@@ -27,7 +27,7 @@ export async function POST(req) {
     learningModule.status = "not started";
   }
 
-  const { resource: createdModule } = await containers.ai_learning.items.create(learningModule);
+  const { resource: createdModule } = await containers.micro_learning.items.create(learningModule);
 
   if (
     learningModule.userId &&
@@ -36,7 +36,7 @@ export async function POST(req) {
   ) {
     await upsertResponseStatus({
       userId: learningModule.userId,
-      aiLearningId: createdModule.id,
+      microLearningId: createdModule.id,
       status: "completed",
       quizzes: Array.isArray(learningModule.quizzes) ? learningModule.quizzes : [],
     });
@@ -75,7 +75,7 @@ export async function PATCH(req) {
   }
 
   try {
-    const { resource: existing } = await containers.ai_learning
+    const { resource: existing } = await containers.micro_learning
       .item(learningId, learningId)
       .read();
 
@@ -92,12 +92,12 @@ export async function PATCH(req) {
       updated.status = status;
     }
 
-    const { resource } = await containers.ai_learning.item(learningId, learningId).replace(updated);
+    const { resource } = await containers.micro_learning.item(learningId, learningId).replace(updated);
 
     if (userId && status) {
       await upsertResponseStatus({
         userId,
-        aiLearningId: learningId,
+        microLearningId: learningId,
         status,
         quizzes: Array.isArray(updated.quizzes) ? updated.quizzes : existing?.quizzes || [],
       });
@@ -129,7 +129,7 @@ export async function GET(req) {
   const forceAssignment = searchParams.get("sync") === "1";
 
   if (!userId) {
-    const { resources: learningModules } = await containers.ai_learning.items.readAll().fetchAll();
+    const { resources: learningModules } = await containers.micro_learning.items.readAll().fetchAll();
     return NextResponse.json(learningModules);
   }
 

@@ -1,0 +1,565 @@
+🟢 DAY 1 — AI ROOKIE
+What You’re Actually Working With
+📘 Micro-learning
+AI predicts patterns — accuracy depends on what you give it
+● Generative AI predicts the next most likely word based on patterns
+● It does not understand truth, intent, or consequence
+● Accuracy depends on the quality and structure of your input
+Example prompt
+“Before answering, explain what information you need from me to give an accurate
+response.”
+
+
+❓ Micro-assessment (MCQ)
+Which statement best explains how AI produces an answer?
+A. It reasons like a human
+B. It looks up facts
+C. It predicts likely word patterns based on input ✅
+D. It decides the best outcome
+Coaching
+● ✅ Correct: This explains why input quality matters so much.
+● ❌ Not quite: AI does not reason or decide — it predicts.
+
+
+🎯 Micro-action
+Ask AI what information it would need to answer a task accurately.
+🧾 AI Usage Log (Required)
+● Category
+● Tool used
+● Time saved (banded)
+● Output confidence: Low / Medium / High
+🌡 Confidence Check
+⬜ Low ⬜ Medium ⬜ High
+
+
+
+🟢 DAY 2 — AI ROOKIE
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+Why AI Can Sound Right and Be Wrong
+📘 Micro-learning
+Fluency is not accuracy
+● AI is trained to sound confident
+● Confidence does not signal correctness
+● Missing information leads to confident guesses
+Example prompt
+“Answer this, then list what assumptions you made due to missing information.”
+
+
+❓ Micro-assessment (Scenario)
+AI gives a confident answer. What’s the best next step?
+A. Use it
+B. Assume it’s correct
+C. Ask what assumptions it made ✅
+D. Ignore it
+Coaching
+● ✅ Correct: Assumptions reveal accuracy risks.
+● ❌ Not quite: Confidence alone is not a quality signal.
+
+🎯 Micro-action
+Ask AI to identify assumptions in one response today.
+🧾 Usage Log + 🌡 Confidence
+(same fields as Day 1)
+
+
+🟢 DAY 3 — AI ROOKIE
+Why AI Answers Change
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+
+
+📘 Micro-learning
+AI works with probability, not certainty
+● Multiple answers can be reasonable
+● Small input changes shift outcomes
+● More structure = more stable results
+Example prompt
+“Give two different answers and explain what information would make one more
+accurate.”
+
+
+❓ Micro-assessment (MCQ)
+Why does AI give different answers?
+A. It’s random
+B. It’s inconsistent
+C. Input changes probability weighting ✅
+D. It lacks training
+Coaching
+● ✅ Correct: Probability explains variability.
+● ❌ Not quite: AI is not random.
+
+
+🎯 Micro-action
+Ask the same question twice and compare results.
+🧾 Usage Log + 🌡 Confidence
+🟢 DAY 4 — AI ROOKIE
+Why Vague Prompts Reduce Accuracy
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+📘 Micro-learning
+Missing structure forces AI to guess
+● Short prompts lack intent
+● AI fills gaps with probability
+● Guessing reduces accuracy
+Example prompt
+“What information is missing that would improve accuracy?”
+❓ Micro-assessment (Scenario)
+Which prompt is more accurate?
+A. “Summarise this.”
+B. “Summarise this for a non-expert audience, focusing on key risks.” ✅
+C. “Make this clearer.”
+D. “Explain simply.”
+Coaching
+● ✅ Correct: Audience + focus improves accuracy.
+● ❌ Not quite: Vague intent increases guesswork.
+🎯 Micro-action
+Add one clarifying sentence to a prompt.
+🧾 Usage Log + 🌡 Confidence
+🟢 DAY 5 — AI ROOKIE
+Humans Stay Accountable
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+📘 Micro-learning
+Accuracy is your responsibility
+● AI does not judge consequences
+● Review is required
+● Accountability never transfers
+Example prompt
+“What should I verify before using this output?”
+❓ Micro-assessment (MCQ)
+Who is responsible for AI output?
+A. AI
+B. Vendor
+C. The user ✅
+D. The system
+Coaching
+● ✅ Correct: Humans own outcomes.
+● ❌ Not quite: AI does not carry responsibility.
+🎯 Micro-action
+Review one AI output before using it.
+🧾 Usage Log + 🌡 Confidence
+🟢 DAY 6 — AI ROOKIE
+Coworking With AI
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+📘 Micro-learning
+AI generates — humans decide
+● AI proposes possibilities
+● Humans evaluate accuracy
+● Clear roles improve outcomes
+Example prompt
+“Here’s what I need help with. I’ll decide what to use.”
+❓ Micro-assessment (MCQ)
+Effective coworking means:
+A. AI decides
+B. Humans decide, AI supports ✅
+C. Responsibility is shared
+D. AI replaces judgment
+🎯 Micro-action
+Use AI today, then explicitly decide whether to use the output.
+🧾 Usage Log + 🌡 Confidence
+🟢 DAY 7 — AI ROOKIE
+Week 1 Integration
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+📘 Micro-learning
+Accuracy comes from structure + information
+● AI predicts patterns
+● Humans provide structure
+● Better inputs = better outputs
+Example prompt
+“Summarise what information I need to provide to maximise accuracy.”
+❓ Micro-assessment (MCQ)
+Which improves AI accuracy most?
+A. Better wording
+B. Clear structure + sufficient information ✅
+C. Faster tools
+D. Longer prompts
+🎯 Micro-action
+Use AI once today with intentional structure.
+🧾 Usage Log + 🌡 Confidence
+🟡 DAYS 8–15 — PROMPT STRUCTURE
+FOR ACCURACY
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+Every day reinforces this sequence:
+Persona → Context → Relevant Information → Instruction → Feedback
+🟡 DAY 8 — AI LEARNER
+Prompt Structure Overview
+📘 Micro-learning
+Accuracy comes from structured information
+● Prompts need to be comprehensive and detailed
+● Structure reduces guessing
+● Missing elements reduce accuracy
+Example prompt (labelled)
+Persona: What role the AI is playing
+Context: Who you are, your situation and goal
+Info: What is relevant to the task
+Instruction: One task broken down into steps
+❓ Micro-assessment (MCQ)
+What causes most inaccurate outputs?
+A. AI limitations
+B. Poor wording
+C. Missing or poorly structured information ✅
+D. Tool choice
+🎯 Micro-action
+Before prompting, mentally list the four elements.
+🧾 Usage Log + 🌡 Confidence
+🟡 DAY 9 — AI LEARNER
+Persona: Who the AI Should Be
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+📘 Micro-learning
+Persona sets perspective and behaviour and is the most important part of the prompt
+● Persona defines how AI thinks
+● It shapes depth and assumptions
+● It allows for a relevant conversation to form
+Example prompt
+Persona: “You are a cautious reviewer focused on accuracy over speed.”
+❓ Micro-assessment (Scenario)
+Which persona improves accuracy for risk review?
+A. Creative brainstormer
+B. Cautious reviewer focused on detail ✅
+C. Friendly assistant
+D. Fast summariser
+🎯 Micro-action
+Write one persona sentence before a prompt today.
+🧾 Usage Log + 🌡 Confidence
+🟡 DAY 10 — AI LEARNER
+Context: Why This Exists
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+📘 Micro-learning
+Context reduces irrelevant output
+● Explains situation and purpose
+● Narrows what matters
+● Gives background information
+Example prompt
+Context: “Our company is in the manufacturing sector. This is for internal
+decision-making and must be precise.”
+❓ Micro-assessment
+Which context improves accuracy?
+A. None
+B. “Explain this.”
+C. “Explain this for internal review, focusing on risks.” ✅
+D. “Make it clear.”
+🎯 Micro-action
+Add why this exists to a prompt.
+🧾 Usage Log + 🌡 Confidence
+🟡 DAY 11 — AI LEARNER
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+Relevant Information: What Actually Matters
+📘 Micro-learning
+AI cannot prioritise relevance for you
+● Too much data adds noise
+● Too little data will cause AI to guess
+Example prompt
+Info: “Use only the facts below. Ignore anything else.”
+❓ Micro-assessment
+Which input improves accuracy?
+A. All available data
+B. Only curated, relevant data ✅
+C. No data
+D. General background
+🎯 Micro-action
+Upload additional data to accompany your instructional prompt.
+🧾 Usage Log + 🌡 Confidence
+🟡 DAY 12 — AI LEARNER
+Instruction: One Clear Task
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+📘 Micro-learning
+Clear tasks reduce variance
+● One task at a time
+● Break down the task into steps
+● Vague instructions increase error
+Example prompt
+Instruction: “Draft a concise summary of key risks only. Please create headings,
+subheadings and give the information in bullet points.”
+❓ Micro-assessment
+Which instruction is most accurate?
+A. “Make this better.”
+B. “Do everything.”
+C. “Summarise key risks only.” ✅
+D. “Help me.”
+🎯 Micro-action
+Rewrite one instruction to be specific.
+🧾 Usage Log + 🌡 Confidence
+🟡 DAY 13 — AI LEARNER
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+Feedback: Correcting the Output
+📘 Micro-learning
+Feedback improves accuracy over time
+● First outputs are drafts
+● Human feedback is essential to prevent drift
+● Ultimately humans are accountable for the output
+Example prompt
+Feedback: “Remove assumptions and tighten the language.”
+❓ Micro-assessment
+Best next step when output is off?
+A. Accept it
+B. Start over
+C. Give feedback and refine ✅
+D. Stop using AI
+🎯 Micro-action
+Give one piece of corrective feedback today.
+🧾 Usage Log + 🌡 Confidence
+🟡 DAY 14 — AI EXPLORER
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+Microlearning: Full Prompt Structure in Action
+Prompt structure reduces error by removing guesswork
+● Persona → how the AI should think and communicate
+● Context → why the task exists and what matters
+● Relevant information → what to base the answer on
+● Instruction → what to do right now
+Example prompt (full, structured)
+Persona: You are a cautious reviewer who prioritises accuracy over speed.
+Context: This will be used for internal decision-making.
+Relevant information: Use only the details below.
+Instruction: Identify key risks and assumptions..
+❓ Micro-assessment
+Which prompt is most accurate?
+A. Long but vague
+B. Structured with sufficient information ✅
+C. Short and clever
+D. Fast
+🎯 Micro-action
+Use the full structure once today.
+🧾 Usage Log + 🌡 Confidence
+🟡 DAY 15 — AI EXPLORER
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level:
+Diagnosing Weak Prompts
+📘 Micro-learning
+Poor accuracy usually means missing structure
+● Diagnose before rewording
+Example prompt
+“What part of this prompt is missing or unclear?”
+❓ Micro-assessment
+What do you fix first?
+A. Tone
+B. Tool
+C. Missing structure or information ✅
+D. Speed
+🎯 Micro-action
+Fix a prompt by adding missing structure, not rewording.
+🧾 Usage Log + 🌡 Confidence
+🔵 DAY 16 — AI EXPLORER
+Comparing Outputs to Judge Accuracy
+🔥 Streak & XP Recap
+🔥 Streak: {{n}} workdays
+⭐ XP: {{x}}
+🧠 Level: AI Explorer
+📘 Micro-learning
+Accuracy improves when you compare, not accept
+● First outputs are rarely the most accurate
+● Comparing outputs reveals assumptions and gaps
+● Humans judge which answer fits the context best
+Example prompt
+Persona: You are a careful analyst focused on accuracy over speed.
+Context: This output will inform a decision.
+Instruction: Provide two different answers and explain the key differences.
+❓ Micro-assessment (Scenario)
+You receive two different AI answers to the same task. What should you do first?
+A. Choose the one that sounds more confident
+B. Average the two answers
+C. Compare assumptions and missing information ✅
+D. Use the shorter one
+Coaching
+● ✅ Correct: Differences reveal where accuracy may be weak.
+● ❌ Not quite: Confidence and brevity are not accuracy signals.
+🎯 Micro-action
+Ask AI for two approaches today and compare them before choosing.
+🧾 AI Usage Log (Required)
+● Category
+● AI tool used
+● Time saved (banded)
+● Output quality confidence: Low / Medium / High
+🌡 Confidence Check
+⬜ Low ⬜ Medium ⬜ High
+⭐ Progress
+You’re judging outputs — not accepting them.
+🔵 DAY 17 — AI EXPLORER
+Asking for Reasoning to Test Reliability
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level: AI Explorer
+📘 Micro-learning
+Reasoning exposes accuracy limits
+● Reasoning shows how the answer was formed
+● Weak logic often signals missing information
+● Transparent reasoning builds trust
+Example prompt
+Persona: You are a methodical thinker who explains logic clearly.
+Instruction: Explain how you arrived at this answer and where it might be weak.
+❓ Micro-assessment (MCQ)
+Why does asking for reasoning improve reliability?
+A. It makes answers longer
+B. It increases confidence
+C. It reveals logic gaps and assumptions ✅
+D. It improves creativity
+Coaching
+● ✅ Correct: Reasoning exposes strengths and weaknesses.
+● ❌ Not quite: Length alone doesn’t improve accuracy.
+🎯 Micro-action
+Ask AI to explain its reasoning for one output today.
+🧾 AI Usage Log (Required)
+🌡 Confidence Check
+⬜ Low ⬜ Medium ⬜ High
+⭐ Progress
+You’re testing answers, not trusting them blindly.
+🔵 DAY 18 — AI EXPLORER
+Using AI to Inform, Not Decide
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level: AI Explorer
+📘 Micro-learning
+AI supports decisions — it does not make them
+● AI cannot weigh consequences
+● Judgment remains human
+● Accuracy includes appropriateness
+Example prompt
+Persona: You are a neutral advisor presenting options.
+Context: A human will make the final decision.
+Instruction: Outline options and trade-offs without recommending one.
+❓ Micro-assessment (Scenario)
+Who is responsible for the final decision?
+A. AI
+B. The system
+C. The human user ✅
+D. The organisation
+Coaching
+● ✅ Correct: Responsibility never transfers.
+● ❌ Not quite: AI does not decide or approve outcomes.
+🎯 Micro-action
+Use AI to outline options, then make the decision yourself.
+🧾 AI Usage Log (Required)
+🌡 Confidence Check
+⬜ Low ⬜ Medium ⬜ High
+⭐ Progress
+You’re keeping judgment where it belongs.
+🔵 DAY 19 — AI EXPLORER
+When Accuracy Is Not Enough
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level: AI Explorer
+📘 Micro-learning
+Even accurate answers may not be appropriate
+● Some tasks require human-only judgment
+● Context and consequences matter
+● Knowing when not to use AI is a skill
+Example prompt
+Persona: You are a cautious reviewer.
+Instruction: Explain whether AI should be used for this task and why.
+❓ Micro-assessment (Scenario)
+Which task may not be suitable for AI?
+A. Drafting a summary
+B. Exploring options
+C. Making a final high-risk decision ✅
+D. Brainstorming ideas
+Coaching
+● ✅ Correct: High-risk decisions require human judgment.
+● ❌ Not quite: AI can support, not replace, accountability.
+🎯 Micro-action
+Identify one task today where you intentionally do not use AI.
+🧾 AI Usage Log (Required)
+🌡 Confidence Check
+⬜ Low ⬜ Medium ⬜ High
+⭐ Progress
+Restraint is part of fluency.
+🔵 DAY 20 — AI EXPLORER
+Reviewing for Accuracy Before Use
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level: AI Explorer
+📘 Micro-learning
+Review prevents error propagation
+● AI errors scale quickly
+● Review protects quality and trust
+● Accountability is active, not passive
+Example prompt
+Persona: You are a risk-aware collaborator.
+Instruction: Identify what should be verified before using this output.
+❓ Micro-assessment (MCQ)
+Why is review required?
+A. AI is slow
+B. AI lacks confidence
+C. Humans remain accountable ✅
+D. AI is unreliable
+Coaching
+● ✅ Correct: Responsibility requires review.
+● ❌ Not quite: Review is about accountability, not distrust.
+🎯 Micro-action
+Review one AI output today before sharing or using it.
+🧾 AI Usage Log (Required)
+🌡 Confidence Check
+⬜ Low ⬜ Medium ⬜ High
+⭐ Progress
+You’re preventing small errors from becoming big ones.
+🔵 DAY 21 — AI EXPLORER
+Integration: Accurate Coworking With AI
+🔥 Streak & XP Recap
+🔥 Streak: {{n}}
+⭐ XP: {{x}}
+🧠 Level: AI Explorer
+📘 Micro-learning
+Accuracy comes from structure, judgment, and review
+● AI predicts patterns
+● Humans provide structure and information
+● Judgment and accountability stay human
+Example prompt
+Persona: You are a thoughtful collaborator focused on accuracy and responsibility.
+Context: This work will be used by others.
+Instruction: Summarise how to cowork with AI to maximise accuracy and
+accountability.
+❓ Micro-assessment (MCQ)
+Which best describes effective coworking with AI?
+A. AI decides, humans review
+B. Humans provide structure and judgment, AI generates options ✅
+C. AI replaces expertise
+D. Responsibility is shared
+Coaching
+● ✅ Correct: Clear roles maximise accuracy and trust.
+● ❌ Not quite: Accountability never transfers to AI.
+🎯 Micro-action
+Use AI today with full structure, review, and judgment.
+🧾 AI Usage Log (Required)
+🌡 Confidence Check
+⬜ Low ⬜ Medium ⬜ High
+⭐ Progress
+You’ve built the foundation for accurate, responsible AI use.

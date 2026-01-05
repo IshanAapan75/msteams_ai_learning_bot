@@ -10,14 +10,13 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req) {
   try {
-    const {
-      userId,
-      quizId,
-      answers,
-      aiLearningId,
-      aiLearningStatus,
-      fluencyScore,
-    } = await req.json();
+    const body = await req.json();
+    const userId = body.userId;
+    const quizId = body.quizId;
+    const answers = body.answers;
+    const microLearningId = body.microLearningId ?? body.aiLearningId ?? null;
+    const microLearningStatus = body.microLearningStatus ?? body.aiLearningStatus ?? null;
+    const fluencyScore = body.fluencyScore;
 
     if (!userId || !quizId || !Array.isArray(answers) || answers.length === 0) {
       return NextResponse.json(
@@ -123,20 +122,20 @@ export async function POST(req) {
       xpEarned: totalXpEarned,
       fluencyScore:
         typeof fluencyScore === "number" ? fluencyScore : null /* placeholder */,
-      aiLearningStatus: aiLearningStatus || null,
+      microLearningStatus: microLearningStatus || null,
       submittedAt: new Date().toISOString(),
     };
 
-    if (!aiLearningId) {
+    if (!microLearningId) {
       return NextResponse.json(
-        { error: "aiLearningId is required to record quiz attempts" },
+        { error: "microLearningId is required to record quiz attempts" },
         { status: 400 }
       );
     }
 
     const attemptUpdate = await markQuizAttempt({
       userId,
-      learningId: aiLearningId,
+      learningId: microLearningId,
       quizId,
       update: {
         status: "completed",
@@ -149,7 +148,7 @@ export async function POST(req) {
       },
     });
 
-    await recordQuizResult({ userId, learningId: aiLearningId, result });
+    await recordQuizResult({ userId, learningId: microLearningId, result });
 
     let rewardRecord = rewardResult.reward;
 
@@ -165,8 +164,8 @@ export async function POST(req) {
       totalXp: xpResult.xp,
       level: xpResult.level,
       badges,
-      aiLearningId,
-      aiLearningStatus: attemptUpdate?.entry?.status || aiLearningStatus || "completed",
+      microLearningId,
+      microLearningStatus: attemptUpdate?.entry?.status || microLearningStatus || "completed",
       streak: rewardResult.streak,
       streakMultiplier: rewardResult.multiplier,
       rewards: rewardRecord,
