@@ -770,7 +770,7 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       const { resources: learningModules } = await containers.ai_learning.items
-        .query({ query: "SELECT * FROM c WHERE c[\"order\"] = 1" })
+        .query({ query: "SELECT * FROM c WHERE c.id = 'micro-learning-day-1'" })
         .fetchAll();
 
       if (!learningModules || learningModules.length === 0) {
