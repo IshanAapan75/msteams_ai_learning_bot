@@ -1,4 +1,5 @@
 import { containers } from "../../../../lib/cosmos.js";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ export async function GET(req) {
     return new Response("userId is required", { status: 400 });
   }
 
+  try {
     const { resource: user } = await containers.users.item(userId, userId).read();
 
     if (!user) {
@@ -50,7 +52,6 @@ export async function GET(req) {
     console.error("Failed to fetch user profile", error);
     return NextResponse.json({ error: "Failed to fetch user profile" }, { status: 500 });
   }
-}
 }
 
 export async function PATCH(req) {

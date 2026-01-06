@@ -1,6 +1,6 @@
 import { containers } from "../../../../lib/cosmos";
 import { NextResponse } from "next/server";
-import { calculateXpAndStreak } from "../../../../lib/xp";
+import { awardXpAction } from "../../../../lib/rewards";
 import { upsertUserProfile } from "../../../../lib/users";
 import { initializeUserRewards } from "../../../../lib/rewards";
 import { calculateFluencyScore } from "../../../../lib/fluency";
@@ -29,8 +29,17 @@ export async function POST(request) {
 
     const { resource: createdUsage } = await containers.userusage.items.create(usageDoc);
 
-    // 1. Update XP and Streak (Existing Logic)
-    const { xpEarned, newStreak, streakUpdated } = await calculateXpAndStreak(userId);
+    // 1. Update XP and Streak
+    const { xpDelta: xpEarned, streak: newStreak } = await awardXpAction({
+      userId,
+      actionType: "ai-usage",
+      metadata: {
+        details: {
+          learningId,
+          ...responses
+        }
+      }
+    });
 
     // 2. Recalculate Dynamic Fluency Score
     // Fetch all user logs to calculate stats
