@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { computeStartTimestamp } from "../../../../lib/utils";
 import { upsertUserProfile } from "../../../../lib/users";
 import { getXpForLevel } from "../../../../lib/xp";
+import { initializeUserRewards } from "../../../../lib/rewards";
 
 const DEFAULT_SCORING_CONFIG = {
     sectionWeights: {
@@ -91,6 +92,14 @@ export async function POST(request) {
         fluencyLevel,
         xp: startingXp,
         level: targetLevel
+    });
+
+    // Update rewards container to keep everything in sync
+    await initializeUserRewards({
+        userId,
+        xp: startingXp,
+        tier: fluencyLevel,
+        fluencyScore
     });
     
     // Auto-assign first learning module if it doesn't exist

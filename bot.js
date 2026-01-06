@@ -254,18 +254,20 @@ function buildSurveyCard(learningId) {
   });
 }
 
-function buildAssessmentResultsCard(score) {
-  const scoreColor =
-    score >= 80 ? "good" : score >= 60 ? "accent" : score >= 40 ? "warning" : "attention";
-  const scoreLabel =
-    score >= 80
-      ? "Advanced User"
-      : score >= 60
-      ? "Proficient User"
-      : score >= 40
-      ? "Developing User"
-      : "Beginner";
+function buildAssessmentResultsCard(score, levelLabel) {
+  // Map levels to colors
+  const levelColors = {
+      'AI Rookie': 'attention',
+      'AI Learner': 'warning',
+      'AI Explorer': 'accent',
+      'AI Practitioner': 'accent',
+      'AI Expert': 'good',
+      'AI Champion': 'good'
+  };
 
+  // Fallback color logic if label doesn't match or is missing
+  const scoreColor = levelColors[levelLabel] || (score >= 80 ? "good" : score >= 60 ? "accent" : score >= 40 ? "warning" : "attention");
+  
   return CardFactory.adaptiveCard({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     version: "1.4",
@@ -294,7 +296,7 @@ function buildAssessmentResultsCard(score) {
       },
       {
         type: "TextBlock",
-        text: `You are an **${scoreLabel}**`,
+        text: `You are an **${levelLabel || "AI User"}**`,
         horizontalAlignment: "center",
         spacing: "none",
       },
@@ -811,6 +813,247 @@ class TeamsBot extends TeamsActivityHandler {
 
   async handleAssessmentCommand(context, state, userId) {
     try {
+      // Fetch questions and config in one go if possible, or parallel
+      const { resources: allItems } = await containers.assessmentquestion.items.query("SELECT * FROM c").fetchAll();
+      const questions = allItems.filter(i => i.id !== 'scoring_config').sort((a, b) => a.id.localeCompare(b.id));
+      const scoringConfig = allItems.find(i => i.id === 'scoring_config');
+
+      const { resources: assessmentResponses } = await containers.assessmentresponse.items
+        .query({
+          query: "SELECT * FROM c WHERE c.userId = @userId",
+          parameters: [{ name: "@userId", value: userId }],
+        })
+        .fetchAll();
+
+      if (assessmentResponses.length > 0) {
+        const latestResponse = assessmentResponses.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+        
+        let levelLabel = latestResponse.fluencyLevel;
+        if (!levelLabel && scoringConfig && latestResponse.fluencyScore !== undefined) {
+             // Fallback: Calculate level if missing in record
+             const score = latestResponse.fluencyScore;
+             levelLabel = scoringConfig.fluencyLevels.find(level => score >= level.range[0] && score <= level.range[1])?.label || "Unknown";
+        }
+
+        await context.sendActivity("You have already completed the AI Fluency Diagnostic. Here are your results:");
+        const resultsCard = buildAssessmentResultsCard(latestResponse.fluencyScore, levelLabel);
+        await context.sendActivity({ attachments: [resultsCard] });
+        return;
+      }
+
+      if (!questions || questions.length === 0) {
+        await context.sendActivity("I couldn't find any assessment questions right now. Please try again later.");
+        return;
+      }
+
+      state.assessmentQuestions = questions;
+
+      const assessmentCard = buildFullAssessmentCard(state.assessmentQuestions);
+      await context.sendActivity({ attachments: [assessmentCard] });
+
+    } catch (error) {
+      console.error("[Bot] Failed to handle assessment command", error);
+      await context.sendActivity("Sorry, I ran into an error while trying to start the assessment.");
+    }
+  }
+
+  async handleFullAssessmentSubmission(context, state, userId, value) {
+    try {
+      const answers = [];
+      
+      // Transform card values to API expected format
+      for (const question of state.assessmentQuestions) {
+        const rawValue = value[`assessment_${question.id}`];
+        if (rawValue !== undefined && rawValue !== "") {
+          let answer;
+          
+          if (question.type === 'mcq') {
+            // MCQs use index as value
+            answer = parseInt(rawValue, 10);
+          } else if (question.type === 'self_assessment') {
+             // Confidence questions use numeric values (1-5)
+             answer = parseInt(rawValue, 10);
+             if (isNaN(answer)) answer = rawValue; // Fallback
+          } else {
+             // Usage frequency and others might be strings or numbers
+             // Try parsing as int, if it matches an option value that is a number
+             const asInt = parseInt(rawValue, 10);
+             const optionWithInt = question.options.find(o => o.value === asInt);
+             if (optionWithInt) {
+                 answer = asInt;
+             } else {
+                 answer = rawValue;
+             }
+          }
+
+          answers.push({
+            questionId: question.id,
+            answer: answer
+          });
+        }
+      }
+
+      const res = await httpFetch(`${appUrl}/api/assessment/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, answers }),
+      });
+
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}));
+        throw new Error(errorBody.error || "API request failed");
+      }
+
+      const result = await res.json();
+      
+      const resultsCard = buildAssessmentResultsCard(result.fluencyScore, result.fluencyLevel);
+      await context.sendActivity({ attachments: [resultsCard] });
+
+    } catch (error) {
+      console.error("[Bot] Failed to handle full assessment submission", error);
+      await context.sendActivity("Sorry, I ran into an error while submitting your assessment. Please try again.");
+    }
+  }
+
+      if (context.activity.value?.action === "complete_learning") {
+        const { learningId } = context.activity.value;
+        await this.markLearningComplete(context, state, userId, learningId);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
+      if (context.activity.value?.action === "submit_survey") {
+        await this.submitSurvey(context, state, userId, context.activity.value);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
+      if (context.activity.value?.action === "view_learning") {
+        await context.sendActivity(
+          "This experience has been updated. Use `/learning` to view your assigned module."
+        );
+        return;
+      }
+
+      if (state.inQuiz) {
+        await this.handleQuizAnswer(context, state, userId, text);
+        await this.conversationState.saveChanges(context);
+        return;
+      }
+
+      if (state.inAssessment) {
+        // This is a fallback if the user types instead of clicking a button.
+        // The main logic is in `handleAssessmentAnswer` which is triggered by card actions.
+        await context.sendActivity("Please use the buttons to answer the assessment question.");
+        return;
+      }
+
+      if (text === "hi") {
+        const { assignment, status } = await syncLearningAssignment(userId);
+
+        if (status === "completed") {
+          await context.sendActivity("You have completed all available learning modules. Great job!");
+        } else if (assignment) {
+          const startsAt = assignment.availableAt;
+          const delayMessage = buildDelayMessage("Next learning", startsAt);
+          if (delayMessage) {
+            await context.sendActivity(delayMessage);
+          } else {
+            const card = buildLearningSummaryCard(assignment);
+            if (card) {
+              await context.sendActivity({ attachments: [card] });
+            }
+          }
+        } else {
+          await context.sendActivity("I couldn't find any learning modules for you yet.");
+        }
+        return;
+      }
+
+      if (assignment?.assignment?.canStart === false) {
+        await context.sendActivity(
+          "You're doing great! Next module will unlock soon. I'll remind you when it's ready."
+        );
+      } else {
+        await context.sendActivity(
+          "Say `start quiz` when you're ready, or `/learning` to view your assignment."
+        );
+      }
+    });
+
+    this.onMembersAdded(async (context, next) => {
+      for (const member of context.activity.membersAdded) {
+        if (member.id !== context.activity.recipient.id) {
+          await this.ensureUserExists(context, member.id, member.name);
+          const displayName = member?.name || member?.givenName || context.activity.from?.name || "there";
+          await context.sendActivity(
+            `👋 **Welcome to AI Champions Bot, ${displayName}!**\nI'll assign your first microlearning shortly.`
+          );
+        }
+      }
+      await next();
+    });
+  }
+
+  async assignFirstLearningModule(context, userId) {
+    if (!userId) {
+      return false;
+    }
+
+    try {
+      const { resources: userResponses } = await containers.responses.items
+        .query({
+          query: "SELECT * FROM c WHERE c.userId = @userId",
+          parameters: [{ name: "@userId", value: userId }],
+        })
+        .fetchAll();
+
+      if (userResponses && userResponses.length > 0) {
+        return false;
+      }
+
+      const { resources: learningModules } = await containers.ai_learning.items
+        .query({ query: "SELECT * FROM c WHERE c.id = 'micro-learning-day-1'" })
+        .fetchAll();
+
+      if (!learningModules || learningModules.length === 0) {
+        return false;
+      }
+
+      const firstModule = learningModules[0];
+      const nowIso = new Date().toISOString();
+      const newResponse = {
+        id: `${userId}-${Date.now()}`,
+        userId,
+        learnings: [
+          {
+            learningId: firstModule.id,
+            status: "assigned",
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            availableAt: computeStartTimestamp(LEARNING_START_DELAY_MINUTES),
+            module: firstModule,
+            attempts: [],
+            quizAvailableAt: null,
+            usageAvailableAt: null,
+          },
+        ],
+        updatedAt: nowIso,
+      };
+
+      await containers.responses.items.create(newResponse);
+      await context.sendActivity(
+        `📘 I've assigned **${firstModule.title || firstModule.topic || "your first learning"}**. Type \`/learning\` to open it.`
+      );
+      return true;
+    } catch (error) {
+      console.error("[Bot] Failed to assign first learning module", error);
+      return false;
+    }
+  }
+
+  async handleAssessmentCommand(context, state, userId) {
+    try {
       const { resources: assessmentResponses } = await containers.assessmentresponse.items
         .query({
           query: "SELECT * FROM c WHERE c.userId = @userId",
@@ -847,67 +1090,59 @@ class TeamsBot extends TeamsActivityHandler {
 
   async handleFullAssessmentSubmission(context, state, userId, value) {
     try {
-      const { resources: scoringConfigRes } = await containers.assessmentquestion.items.query("SELECT * FROM c WHERE c.id = 'scoring_config'").fetchAll();
-      const scoringConfig = scoringConfigRes[0];
-
-      let totalScore = 0;
-      const responses = [];
-
-      // Handle MCQ questions
-      for (const section in scoringConfig.sectionWeights) {
-        const sectionConfig = scoringConfig.sectionWeights[section];
-        const questionsInSection = sectionConfig.questions;
-        const weight = sectionConfig.weight;
-        const pointsPerQuestion = weight / questionsInSection.length;
-
-        for (const questionId of questionsInSection) {
-          const question = state.assessmentQuestions.find(q => q.id === questionId);
-          if (question) {
-            const answerIndex = parseInt(value[`assessment_${questionId}`], 10);
-            const isCorrect = answerIndex === question.correctAnswerIndex;
-            const score = isCorrect ? pointsPerQuestion : 0;
-            totalScore += score;
-            responses.push({
-              questionId: questionId,
-              answerIndex: answerIndex,
-              isCorrect: isCorrect,
-              score: score
-            });
+      const answers = [];
+      
+      // Transform card values to API expected format
+      for (const question of state.assessmentQuestions) {
+        const rawValue = value[`assessment_${question.id}`];
+        if (rawValue !== undefined && rawValue !== "") {
+          let answer;
+          
+          if (question.type === 'mcq') {
+            // MCQs use index as value
+            answer = parseInt(rawValue, 10);
+          } else if (question.type === 'self_assessment') {
+             // Confidence questions use numeric values (1-5)
+             answer = parseInt(rawValue, 10);
+             if (isNaN(answer)) answer = rawValue; // Fallback
+          } else {
+             // Usage frequency and others might be strings or numbers
+             // Try parsing as int, if it matches an option value that is a number
+             const asInt = parseInt(rawValue, 10);
+             const optionWithInt = question.options.find(o => o.value === asInt);
+             if (optionWithInt) {
+                 answer = asInt;
+             } else {
+                 answer = rawValue;
+             }
           }
-        }
-      }
 
-      // Handle self-assessment questions
-      const selfAssessmentQuestions = state.assessmentQuestions.filter(q => q.type === 'self_assessment' || q.type === 'usage_frequency');
-      for (const question of selfAssessmentQuestions) {
-        const selectedValue = value[`assessment_${question.id}`];
-        const selectedOption = question.options.find(o => o.value === selectedValue);
-        if (selectedOption) {
-          totalScore += selectedOption.score;
-          responses.push({
+          answers.push({
             questionId: question.id,
-            selectedValue: selectedValue,
-            score: selectedOption.score
+            answer: answer
           });
         }
       }
 
-      const assessmentResponse = {
-        id: `${userId}-${new Date().getTime()}`,
-        userId: userId,
-        responses: responses,
-        fluencyScore: Math.round(totalScore),
-        timestamp: new Date().toISOString()
-      };
+      const res = await httpFetch(`${appUrl}/api/assessment/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, answers }),
+      });
 
-      await containers.assessmentresponse.items.create(assessmentResponse);
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}));
+        throw new Error(errorBody.error || "API request failed");
+      }
 
-      const resultsCard = buildAssessmentResultsCard(Math.round(totalScore));
+      const result = await res.json();
+      
+      const resultsCard = buildAssessmentResultsCard(result.fluencyScore);
       await context.sendActivity({ attachments: [resultsCard] });
 
     } catch (error) {
       console.error("[Bot] Failed to handle full assessment submission", error);
-      await context.sendActivity("Sorry, I ran into an error while trying to submit your assessment.");
+      await context.sendActivity("Sorry, I ran into an error while submitting your assessment. Please try again.");
     }
   }
 
