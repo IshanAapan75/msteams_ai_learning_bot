@@ -131,7 +131,7 @@ export async function POST(request) {
                 userId: userId,
                 learnings: [{
                     learningId: firstModule.id,
-                    status: "assigned",
+                    status: "available",
                     createdAt: nowIso,
                     updatedAt: nowIso,
                     availableAt: computeStartTimestamp(5), // 5 minutes delay

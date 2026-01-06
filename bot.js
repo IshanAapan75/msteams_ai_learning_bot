@@ -113,7 +113,7 @@ function buildLearningSummaryCard(assignment) {
   }
 
   const statusFacts = [];
-  statusFacts.push({ title: "Status", value: assignment.status || "assigned" });
+  statusFacts.push({ title: "Status", value: assignment.status || "available" });
   if (assignment.availableAt) {
     statusFacts.push({ title: "Available", value: new Date(assignment.availableAt).toLocaleString() });
   }
@@ -144,7 +144,7 @@ function buildLearningSummaryCard(assignment) {
   if (assignment.canStart) {
     actions.push({
       type: "Action.Submit",
-      title: "Mark Learning Complete",
+      title: "Learning Complete",
       data: {
         action: "complete_learning",
         learningId: assignment.learningId,
@@ -265,8 +265,7 @@ function buildAssessmentResultsCard(score, levelLabel) {
       'AI Champion': 'good'
   };
 
-  // Fallback color logic if label doesn't match or is missing
-  const scoreColor = levelColors[levelLabel] || (score >= 80 ? "good" : score >= 60 ? "accent" : score >= 40 ? "warning" : "attention");
+  const scoreColor = levelColors[levelLabel];
   
   return CardFactory.adaptiveCard({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -296,7 +295,7 @@ function buildAssessmentResultsCard(score, levelLabel) {
       },
       {
         type: "TextBlock",
-        text: `You are an **${levelLabel || "AI User"}**`,
+        text: `You are an **${levelLabel}**`,
         horizontalAlignment: "center",
         spacing: "none",
       },
@@ -437,7 +436,7 @@ class TeamsBot extends TeamsActivityHandler {
       const state = await this.quizState.get(context, {
         inQuiz: false,
         microLearningId: null,
-        microLearningStatus: "assigned",
+        microLearningStatus: "available",
         microLearningQuizzes: [],
         currentQuiz: null,
         questionIndex: 0,
@@ -463,13 +462,6 @@ class TeamsBot extends TeamsActivityHandler {
         );
       }
 
-      await this.assignFirstLearningModule(context, userId);
-
-      const assignment = await fetchAssignment(userId);
-      state.microLearningId = assignment?.assignment?.learningId || state.microLearningId;
-      state.microLearningStatus = assignment?.assignment?.status || state.microLearningStatus;
-      state.microLearningQuizzes = assignment?.assignment?.module?.quizzes || state.microLearningQuizzes;
-
       // Check if user has taken assessment before allowing other commands
       const { resources: assessmentResponses } = await containers.assessmentresponse.items
         .query({
@@ -478,12 +470,29 @@ class TeamsBot extends TeamsActivityHandler {
         })
         .fetchAll();
 
-      if (assessmentResponses.length === 0 && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
+      const hasCompletedAssessment = assessmentResponses.length > 0;
+
+      if (!hasCompletedAssessment && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
         await context.sendActivity("Please complete the AI Fluency Diagnostic first by typing `/assessment`.");
         return;
       }
 
+      let assignment = null;
+      if (hasCompletedAssessment) {
+        await this.assignFirstLearningModule(context, userId);
+
+        assignment = await fetchAssignment(userId);
+        state.microLearningId = assignment?.assignment?.learningId || state.microLearningId;
+        state.microLearningStatus = assignment?.assignment?.status || state.microLearningStatus;
+        state.microLearningQuizzes = assignment?.assignment?.module?.quizzes || state.microLearningQuizzes;
+      }
+
       if (text === "start quiz") {
+        if (!assignment) {
+          await context.sendActivity("Please complete the AI Fluency Diagnostic first by typing `/assessment`.");
+          return;
+        }
+
         const activeLearning = assignment?.assignment;
 
         if (activeLearning && activeLearning.status !== "completed") {
@@ -689,7 +698,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       if (context.activity.value?.action === "view_learning") {
         await context.sendActivity(
-          "This experience has been updated. Use `/learning` to view your assigned module."
+          "This experience has been updated. Use `/learning` to view your available module."
         );
         return;
       }
@@ -746,7 +755,7 @@ class TeamsBot extends TeamsActivityHandler {
           await this.ensureUserExists(context, member.id, member.name);
           const displayName = member?.name || member?.givenName || context.activity.from?.name || "there";
           await context.sendActivity(
-            `👋 **Welcome to AI Champions Bot, ${displayName}!**\nI'll assign your first microlearning shortly.`
+            `👋 **Welcome to Momentum by AI Champions, ${displayName}!**\nI'll assign your first microlearning shortly.`
           );
         }
       }
@@ -787,7 +796,7 @@ class TeamsBot extends TeamsActivityHandler {
         learnings: [
           {
             learningId: firstModule.id,
-            status: "assigned",
+            status: "available",
             createdAt: nowIso,
             updatedAt: nowIso,
             availableAt: computeStartTimestamp(LEARNING_START_DELAY_MINUTES),
@@ -802,7 +811,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       await containers.responses.items.create(newResponse);
       await context.sendActivity(
-        `📘 I've assigned **${firstModule.title || firstModule.topic || "your first learning"}**. Type \`/learning\` to open it.`
+        `📘 I've made **${firstModule.title || firstModule.topic || "your first learning"}** available. Type \`/learning\` to open it.`
       );
       return true;
     } catch (error) {
@@ -909,6 +918,18 @@ class TeamsBot extends TeamsActivityHandler {
       const resultsCard = buildAssessmentResultsCard(result.fluencyScore, result.fluencyLevel);
       await context.sendActivity({ attachments: [resultsCard] });
 
+      const assigned = await this.assignFirstLearningModule(context, userId);
+      if (assigned) {
+        await context.sendActivity("📘 Let's get started! Type `/learning` to open your first module.");
+      } else {
+        const assignment = await fetchAssignment(userId);
+        if (assignment?.assignment) {
+          await context.sendActivity(
+            "📘 You're all set. Type `/learning` to continue with your personalized module."
+          );
+        }
+      }
+
     } catch (error) {
       console.error("[Bot] Failed to handle full assessment submission", error);
       await context.sendActivity("Sorry, I ran into an error while submitting your assessment. Please try again.");
@@ -956,6 +977,8 @@ class TeamsBot extends TeamsActivityHandler {
       await context.sendActivity(
         "✅ Learning marked complete! You can start the quiz right away by typing `start quiz`."
       );
+
+      await this.promptUsageAndWrapUp(context, { userId });
     } catch (error) {
       console.error("[Bot] Failed to mark learning complete", error);
       await context.sendActivity("Sorry, I couldn't update your learning status. Try again later.");
@@ -1052,7 +1075,7 @@ class TeamsBot extends TeamsActivityHandler {
                 const nextAvailableAt = new Date(submittedAtMs + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
                 const nextLearningEntry = {
                     learningId: nextModule.id,
-                    status: "assigned",
+                    status: "available",
                     createdAt: submittedAtIso,
                     updatedAt: submittedAtIso,
                     availableAt: nextAvailableAt,
@@ -1067,7 +1090,7 @@ class TeamsBot extends TeamsActivityHandler {
                 state.microLearningQuizzes = Array.isArray(nextModule.quizzes) ? nextModule.quizzes : [];
                 nextAssignmentMessage =
                     buildDelayMessage("Next learning", nextAvailableAt) ||
-                    "🙌 Logged! I've assigned your next learning module.";
+                    "🙌 Logged! Your next learning module will be available soon.";
             } else {
                 nextAssignmentMessage = "🙌 Logged! You have completed all available learning modules.";
             }
@@ -1155,6 +1178,7 @@ class TeamsBot extends TeamsActivityHandler {
             parameters: [{ name: "@userId", value: userId }]
         }).fetchAll();
 
+        let quizPassed = false;
         if (userResponses.length > 0) {
             const userResponse = userResponses[0];
             const learning = userResponse.learnings.find(l => l.learningId === state.microLearningId);
@@ -1164,9 +1188,14 @@ class TeamsBot extends TeamsActivityHandler {
                 if (result.result === "passed") {
                     learning.quizPassedAt = new Date().toISOString();
                     learning.usageAvailableAt = computeStartTimestamp(USAGE_START_DELAY_MINUTES);
+                    quizPassed = true;
                 }
                 await containers.responses.items.upsert(userResponse);
             }
+        }
+
+        if (quizPassed) {
+          await this.promptUsageAndWrapUp(context, { userId, ensureNextLearning: true });
         }
       }
     } catch (error) {
@@ -1283,6 +1312,42 @@ class TeamsBot extends TeamsActivityHandler {
       });
     } catch (error) {
       console.error("[Bot] Failed to award usage XP", error);
+    }
+  }
+
+  async promptUsageLogging(context) {
+    await context.sendActivity(
+      "📝 Once you're ready, capture today's AI win by typing `/logusage` to log your usage."
+    );
+  }
+
+  async sendDailyWrapUp(context) {
+    await context.sendActivity("✅ That's all for today! Come back tomorrow for your next learning drop.");
+  }
+
+  async promptUsageAndWrapUp(context, { ensureNextLearning = false, userId } = {}) {
+    await this.promptUsageLogging(context);
+    await this.sendDailyWrapUp(context);
+
+    if (ensureNextLearning && userId) {
+      await this.ensureNextLearningQueued(userId);
+    }
+  }
+
+  async ensureNextLearningQueued(userId) {
+    if (!userId) {
+      return;
+    }
+
+    try {
+      const existing = await fetchAssignment(userId);
+      if (existing?.assignment) {
+        return;
+      }
+
+      await syncLearningAssignment(userId, true);
+    } catch (error) {
+      console.error("[Bot] Failed to queue next learning", error);
     }
   }
 
