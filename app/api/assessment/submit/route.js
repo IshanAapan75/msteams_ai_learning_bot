@@ -123,10 +123,17 @@ export async function POST(request) {
     }).fetchAll();
 
     if (!userResponses || userResponses.length === 0) {
+        // Cap the starting content tier at "AI Explorer"
+        let effectiveTier = fluencyLevel;
+        const highLevels = ['AI Practitioner', 'AI Expert', 'AI Champion'];
+        if (highLevels.includes(effectiveTier)) {
+            effectiveTier = 'AI Explorer';
+        }
+
         // Try to find the correct starting module for this tier
         let { resources: learningModules } = await containers.ai_learning.items.query({
             query: "SELECT * FROM c WHERE c.tier = @tier ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1",
-            parameters: [{ name: "@tier", value: fluencyLevel }]
+            parameters: [{ name: "@tier", value: effectiveTier }]
         }).fetchAll();
 
         // Fallback to order 1 if no module found for the specific tier
@@ -148,7 +155,7 @@ export async function POST(request) {
                     status: "assigned",
                     createdAt: nowIso,
                     updatedAt: nowIso,
-                    availableAt: computeStartTimestamp(5), // 5 minutes delay
+                    availableAt: nowIso, // Instantly available
                     module: firstModule,
                     attempts: [],
                     quizAvailableAt: null,

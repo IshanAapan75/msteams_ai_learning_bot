@@ -213,24 +213,48 @@ function buildSurveyCard(learningId) {
           "60+ min",
         ].map((label) => ({ title: label, value: label })),
       },
-      {
-        type: "TextBlock",
-        text: "Confidence in output quality *",
-        weight: "bolder",
-        spacing: "medium",
-      },
-      {
-        type: "Input.ChoiceSet",
-        id: "confidence",
-        style: "expanded",
-        choices: [
-          { title: "Low", value: "low" },
-          { title: "Medium", value: "medium" },
-          { title: "High", value: "high" },
-        ],
-      },
-      {
-        type: "TextBlock",
+    {
+      type: "TextBlock",
+      text: "How confident are you in the quality of the AI output?",
+      wrap: true,
+      spacing: "medium",
+    },
+    {
+      type: "Input.ChoiceSet",
+      id: "survey_confidence",
+      style: "expanded",
+      isRequired: true,
+      errorMessage: "Please rate your confidence",
+      choices: [
+        { title: "1 - Low", value: "1" },
+        { title: "2", value: "2" },
+        { title: "3 - Medium", value: "3" },
+        { title: "4", value: "4" },
+        { title: "5 - High", value: "5" },
+      ],
+    },
+    {
+      type: "TextBlock",
+      text: "How do you feel about AI right now?",
+      wrap: true,
+      spacing: "medium",
+    },
+    {
+      type: "Input.ChoiceSet",
+      id: "survey_sentiment",
+      style: "expanded",
+      isRequired: true,
+      errorMessage: "Please rate your sentiment",
+      choices: [
+        { title: "1 - Frustrated/Anxious", value: "1" },
+        { title: "2 - Skeptical", value: "2" },
+        { title: "3 - Neutral", value: "3" },
+        { title: "4 - Curious", value: "4" },
+        { title: "5 - Confident/Excited", value: "5" },
+      ],
+    },
+    {
+      type: "TextBlock",
         text: "Brief description (optional)",
         spacing: "medium",
       },
@@ -780,15 +804,43 @@ class TeamsBot extends TeamsActivityHandler {
         return false;
       }
 
-      const { resources: learningModules } = await containers.ai_learning.items
-        .query({ query: "SELECT * FROM c WHERE c.id = 'micro-learning-day-1'" })
-        .fetchAll();
+      // 1. Get User's Fluency Level
+      const { resource: userProfile } = await containers.users.item(userId, userId).read();
+      let userTier = userProfile?.fluencyLevel;
 
-      if (!learningModules || learningModules.length === 0) {
+      // Cap the starting content tier at "AI Explorer"
+      // Even if they are Practitioner/Expert/Champion, they start at the Explorer track.
+      const highLevels = ['AI Practitioner', 'AI Expert', 'AI Champion'];
+      if (highLevels.includes(userTier)) {
+          userTier = 'AI Explorer';
+      }
+
+      let firstModule = null;
+
+      // 2. Try to find content matching their tier
+      if (userTier) {
+          const { resources: tierModules } = await containers.ai_learning.items.query({
+              query: "SELECT * FROM c WHERE c.tier = @tier ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1",
+              parameters: [{ name: "@tier", value: userTier }]
+          }).fetchAll();
+          
+          if (tierModules.length > 0) {
+              firstModule = tierModules[0];
+          }
+      }
+
+      // 3. Fallback to Day 1 / Default content if no tier match
+      if (!firstModule) {
+          const { resources: defaultModules } = await containers.ai_learning.items
+            .query({ query: "SELECT * FROM c WHERE c.id = 'micro-learning-day-1'" })
+            .fetchAll();
+          firstModule = defaultModules[0];
+      }
+
+      if (!firstModule) {
         return false;
       }
 
-      const firstModule = learningModules[0];
       const nowIso = new Date().toISOString();
       const newResponse = {
         id: `${userId}-${Date.now()}`,
@@ -796,10 +848,10 @@ class TeamsBot extends TeamsActivityHandler {
         learnings: [
           {
             learningId: firstModule.id,
-            status: "available",
+            status: "assigned",
             createdAt: nowIso,
             updatedAt: nowIso,
-            availableAt: computeStartTimestamp(LEARNING_START_DELAY_MINUTES),
+            availableAt: nowIso, // Instantly available
             module: firstModule,
             attempts: [],
             quizAvailableAt: null,
@@ -811,7 +863,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       await containers.responses.items.create(newResponse);
       await context.sendActivity(
-        `📘 I've made **${firstModule.title || firstModule.topic || "your first learning"}** available. Type \`/learning\` to open it.`
+        `📘 based on your level **${userTier || 'Beginner'}**, I've assigned **${firstModule.title || firstModule.topic}**. Type \`/learning\` to open it.`
       );
       return true;
     } catch (error) {
@@ -920,6 +972,9 @@ class TeamsBot extends TeamsActivityHandler {
 
       const result = await res.json();
       
+      // Mark assessment as completed in state to allow further commands immediately
+      state.assessmentCompleted = true;
+
       const resultsCard = buildAssessmentResultsCard(result.fluencyScore, result.fluencyLevel);
       await context.sendActivity({ attachments: [resultsCard] });
 
@@ -980,10 +1035,11 @@ class TeamsBot extends TeamsActivityHandler {
       state.microLearningStatus = "completed";
 
       await context.sendActivity(
-        "✅ Learning marked complete! You can start the quiz right away by typing `start quiz`."
+        "✅ **Learning marked complete!**\n\nYou can start the quiz right away by typing `start quiz`."
       );
 
-      await this.promptUsageAndWrapUp(context, { userId });
+      // We removed the extra prompts here as per requirements to keep it focused on the quiz.
+
     } catch (error) {
       console.error("[Bot] Failed to mark learning complete", error);
       await context.sendActivity("Sorry, I couldn't update your learning status. Try again later.");
