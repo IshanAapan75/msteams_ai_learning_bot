@@ -487,18 +487,24 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       // Check if user has taken assessment before allowing other commands
-      const { resources: assessmentResponses } = await containers.assessmentresponse.items
-        .query({
-          query: "SELECT * FROM c WHERE c.userId = @userId",
-          parameters: [{ name: "@userId", value: userId }],
-        })
-        .fetchAll();
+      // Ensure state is synchronized with DB if currently false
+      if (!state.assessmentCompleted) {
+          const { resources: assessmentResponses } = await containers.assessmentresponse.items
+            .query({
+              query: "SELECT * FROM c WHERE c.userId = @userId",
+              parameters: [{ name: "@userId", value: userId }],
+            })
+            .fetchAll();
+          
+          if (assessmentResponses.length > 0) {
+              state.assessmentCompleted = true;
+          }
+      }
 
-      const hasCompletedAssessment = assessmentResponses.length > 0;
-
-      if (!hasCompletedAssessment && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
-        await context.sendActivity("Please complete the AI Fluency Diagnostic first by typing `/assessment`.");
-        return;
+      // Block if truly not completed and trying to do something else
+      if (!state.assessmentCompleted && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
+          await context.sendActivity("Please complete the AI Fluency Diagnostic first by typing `/assessment`.");
+          return;
       }
 
       let assignment = null;

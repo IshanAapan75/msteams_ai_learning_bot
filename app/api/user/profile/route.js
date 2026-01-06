@@ -10,13 +10,47 @@ export async function GET(req) {
     return new Response("userId is required", { status: 400 });
   }
 
-  const { resource: user } = await containers.users.item(userId, userId).read();
+    const { resource: user } = await containers.users.item(userId, userId).read();
 
-  if (!user) {
-    return new Response("User not found", { status: 404 });
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Fetch learning history
+    const { resources: userResponses } = await containers.responses.items
+        .query({
+            query: "SELECT * FROM c WHERE c.userId = @userId ORDER BY c.timestamp DESC",
+            parameters: [{ name: "@userId", value: userId }]
+        })
+        .fetchAll();
+    
+    // Map responses to history format expected by frontend
+    const history = userResponses.map(r => {
+        const learning = r.learnings && r.learnings.length > 0 ? r.learnings[0] : null;
+        if (!learning) return null;
+        
+        return {
+            id: learning.learningId,
+            title: learning.module?.title || learning.module?.topic || "Unknown Module",
+            status: learning.status, // "assigned", "completed"
+            score: learning.score || 0, // Quiz score if available
+            date: learning.updatedAt || r.timestamp
+        };
+    }).filter(h => h !== null);
+
+    // Merge history into user object
+    const userWithHistory = {
+        ...user,
+        history
+    };
+
+    return NextResponse.json(userWithHistory);
+
+  } catch (error) {
+    console.error("Failed to fetch user profile", error);
+    return NextResponse.json({ error: "Failed to fetch user profile" }, { status: 500 });
   }
-
-  return Response.json(user);
+}
 }
 
 export async function PATCH(req) {
