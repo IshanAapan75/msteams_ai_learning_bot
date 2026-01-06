@@ -476,7 +476,7 @@ class TeamsBot extends TeamsActivityHandler {
         })
         .fetchAll();
 
-      if (assessmentResponses.length === 0 && text !== "/assessment") {
+      if (assessmentResponses.length === 0 && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
         await context.sendActivity("Please complete the AI Fluency Diagnostic first by typing `/assessment`.");
         return;
       }
