@@ -824,7 +824,12 @@ class TeamsBot extends TeamsActivityHandler {
     try {
       // Fetch questions and config in one go if possible, or parallel
       const { resources: allItems } = await containers.assessmentquestion.items.query("SELECT * FROM c").fetchAll();
-      const questions = allItems.filter(i => i.id !== 'scoring_config').sort((a, b) => a.id.localeCompare(b.id));
+      
+      // Sort questions naturally (q1, q2, ... q10) instead of lexicographically (q1, q10, q2)
+      const questions = allItems
+        .filter(i => i.id !== 'scoring_config')
+        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' }));
+        
       const scoringConfig = allItems.find(i => i.id === 'scoring_config');
 
       const { resources: assessmentResponses } = await containers.assessmentresponse.items

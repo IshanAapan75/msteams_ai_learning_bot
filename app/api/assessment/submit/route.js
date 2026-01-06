@@ -59,10 +59,24 @@ export async function POST(request) {
             if (section && userAnswer.answer === question.correctAnswerIndex) {
                 totalPointsEarned += section.weight / section.questions.length;
             }
-        } else if (question.type === 'self_assessment' || question.type === 'usage_frequency') {
-            const selectedOption = question.options.find(opt => opt.value === userAnswer.answer);
-            if (selectedOption) {
-                totalPointsEarned += selectedOption.score;
+        } else if (question.type === 'self_assessment') {
+            // Explicit scoring for Confidence (Q9)
+            // 1 → 2 pts, 2 → 4 pts, 3 → 6 pts, 4 → 8 pts, 5 → 10 pts
+            const val = parseInt(userAnswer.answer, 10);
+            if (!isNaN(val) && val >= 1 && val <= 5) {
+                totalPointsEarned += val * 2;
+            }
+        } else if (question.type === 'usage_frequency') {
+            // Explicit scoring for Usage Frequency (Q10)
+            const map = {
+                'Never': 0,
+                'Monthly': 2,
+                'Weekly': 5,
+                'Multiple weekly': 8,
+                'Daily': 10
+            };
+            if (map.hasOwnProperty(userAnswer.answer)) {
+                totalPointsEarned += map[userAnswer.answer];
             }
         }
     }
@@ -131,7 +145,7 @@ export async function POST(request) {
                 userId: userId,
                 learnings: [{
                     learningId: firstModule.id,
-                    status: "available",
+                    status: "assigned",
                     createdAt: nowIso,
                     updatedAt: nowIso,
                     availableAt: computeStartTimestamp(5), // 5 minutes delay
