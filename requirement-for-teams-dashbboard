@@ -1,0 +1,89 @@
+1. Team Analytics (from TeamAnalyticsResponse)
+
+  This data provides an overview of the entire team's performance and activity.
+
+   * `team` object:
+       * `id`: Unique identifier for the team (string).
+       * `name`: Display name of the team (string).
+       * `score`: An aggregated score representing the team's overall performance (number).
+       * `memberCount`: The total number of members in the team (number).
+       * `totalXp`: The sum of experience points accumulated by all team members (number).
+       * `avgStreak`: The average activity streak across all team members (number).
+       * `maxStreak`: The highest activity streak achieved by any member within the team (number).
+       * `lastActive`: The timestamp of the most recent activity within the team (string | null).
+
+   * `members` array: A list of TeamMemberRecord objects, each summarizing key metrics for an individual team member.
+       * For each TeamMemberRecord:
+           * `id`: Unique identifier for the team member (string).
+           * `name`: Display name of the team member (string).
+           * `xp`: Total experience points earned by this individual member (number).
+           * `streak`: Current consecutive activity streak for this member (number).
+           * `lastActionDate`: The timestamp of this member's last recorded action (string | null).
+
+   * `accessibleTeams` array: A list of team IDs (strings) that the currently logged-in user has permissions to view, allowing for navigation between      
+     teams.
+
+  2. Team Member Analytics (Aggregated from various types for individual users)
+
+  While there isn't a single TeamMemberAnalytics interface that encompasses everything, individual team member data is fetched and displayed by combining
+  information from several scope: "personal" responses. When viewing a specific team member's details, the frontend would query endpoints providing these
+  individual metrics:
+
+   * Core Metrics (from `OverviewResponse` with `scope: "personal"`):
+       * `user`: Basic user details (id, name, role, teamId).
+       * `metrics`:
+           * `totalXp`: Total experience points earned by the member.
+           * `level`: Current numerical level achieved.
+           * `streak`: Current activity streak.
+           * `badges`: Total number of badges earned.
+           * `lastActionDate`: Date of their most recent activity.
+           * `nextMilestoneXp`: XP target for the next significant milestone.
+           * `xpToNextMilestone`: XP remaining until the next milestone.
+
+   * Level and Badges Details (from `BadgesResponse` for the specific member):
+       * `metrics` (LevelMetric):
+           * `totalXp`: Member's total XP.
+           * `currentLevel`: The name of their current level (e.g., "Novice," "Expert").
+           * `currentLevelNum`: The numerical representation of their current level.
+           * `xpProgress`: Progress (e.g., percentage) towards the next level.
+           * `nextLevelXP`: Total XP required for the next level.
+           * `xpToNextLevel`: Remaining XP needed to reach the next level.
+           * `currentStreak`: Their current activity streak.
+       * `skillBadges`, `streakBadges`, `productivityBadges`: Arrays of ProcessedBadge objects. Each ProcessedBadge includes:
+           * id, name, tier, description, icon.
+           * criteria: Specific details of what's required to earn the badge (e.g., streak, taskTypes, totalMinutesSaved, confidence, count,
+             totalUsageLogs, teamRank, insightsShared, timeFrame).
+           * earned: Boolean indicating if the badge has been earned.
+           * progress: Numeric value indicating how close they are to earning it.
+           * progressDetail: A descriptive string about their progress.
+
+   * Learning Progression (from `LearningResponse` with `scope: "personal"`):
+       * `summary`: Counts of learning modules: notStarted, inProgress, completed.
+       * `recentCompletions`: A list of recently completed learnings, including learningId and completedAt.
+       * `detailedLearnings`: An array of LearningEntry objects, each representing a specific learning module:
+           * learningId, status (e.g., "completed"), createdAt, updatedAt, availableAt, completedAt, quizPassedAt.
+           * module: Details about the learning module (id, topic, description, level, order, quizzes).
+           * attempts: Records of quiz attempts.
+           * survey: Optional survey data associated with the learning (actionType, timeSaved, confidence, notes, submittedAt).
+
+   * Quiz Performance (from `QuizResponse` with `scope: "personal"`):
+       * `attempts`: Total number of quizzes attempted.
+       * `passed`: Number of quizzes successfully passed.
+       * `passRate`: Percentage of quizzes passed.
+       * `avgScore`: Average score across all quizzes.
+       * `latestAttempts`: A list of recent QuizAttempt records with details like quizId, userId, userName, result, status, submittedAt, and score
+         (correct, total).
+
+   * Wins/Achievements (from `WinsResponse` with `scope: "personal"`):
+       * `entries`: A list of WinEntry objects detailing individual achievements or "wins," including userId, userName, awardedBy, awarded, value, streak,
+         multiplier, timestamp, and details.
+
+   * Habits (from `HabitsResponse` with `scope: "personal"`):
+       * `components`: Metrics related to different aspects of user habits: assessments, usage, quality, confidence, consistency.
+
+   * XP Trends (from `TrendResponse` with `scope: "personal"`):
+       * `series`: An array of TrendPoint objects, each containing a date and xpEarned for that day, allowing for graphical representation of XP
+         accumulation over time.
+
+  This detailed structure allows the frontend to present a comprehensive view of both team-level progress and individual member contributions,
+  achievements, and learning journeys.

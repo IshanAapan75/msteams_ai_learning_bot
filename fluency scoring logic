@@ -1,0 +1,55 @@
+Scoring Logic → Baseline Fluency Score 
+Question Weights (MVP) 
+Section 
+Weight 
+Knowledge & mental models (Q1–Q3) 30 points 
+Prompting skills (Q4–Q5) 
+Applied judgment (Q6–Q7) 
+Safety awareness (Q8) 
+20 points 
+20 points 
+10 points 
+Confidence (Q9) 
+10 points 
+Usage frequency (Q10) 
+Total 
+Scoring Rules 
+10 points 
+100 
+points 
+● Correct MCQ/scenario = full points for that question 
+● Incorrect = 0 for that question (no penalty) 
+● Confidence (Q9): 
+○ 1 → 2 pts 
+○ 2 → 4 pts 
+○ 3 → 6 pts 
+○ 4 → 8 pts 
+○ 5 → 10 pts 
+● Usage frequency (Q10): 
+○ Never → 0 
+○ Monthly → 2 
+○ Weekly → 5 
+○ Multiple weekly → 8 
+○ Daily → 10 
+Final sum = Baseline AI Fluency Score (0–100) 
+5⃣ Mapping Baseline Score to Levels 
+Immediately classify users: 
+Fluency 
+Score 
+0–20 
+21–40 
+41–60 
+61–75 
+76–90 
+91–100 
+This determines: 
+Starting Level 
+AI Rookie 
+AI Learner 
+AI Explorer 
+AI Practitioner 
+AI Expert 
+AI Champion 
+● where they start in the game 
+● which micro-learning appears first 
+● what coaching tone to use
