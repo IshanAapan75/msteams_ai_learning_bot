@@ -847,45 +847,48 @@ class TeamsBot extends TeamsActivityHandler {
 
   async handleFullAssessmentSubmission(context, state, userId, value) {
     try {
-      const { resources: scoringConfig } = await containers.assessmentquestion.items.query("SELECT * FROM c WHERE c.id = 'scoring_config'").fetchAll();
-      
-      if (!scoringConfig || scoringConfig.length === 0) {
-          console.error("[Bot] Scoring config not found in database.");
-          await context.sendActivity("Sorry, I'm missing the information needed to score your assessment. Please contact an administrator.");
-          return;
-      }
-      
-      const scoring = scoringConfig[0];
+      const { resources: scoringConfigRes } = await containers.assessmentquestion.items.query("SELECT * FROM c WHERE c.id = 'scoring_config'").fetchAll();
+      const scoringConfig = scoringConfigRes[0];
 
-      if (!scoring.scores) {
-          console.error("[Bot] 'scores' property not found in scoring config.");
-          await context.sendActivity("Sorry, the assessment scoring is not configured correctly. Please contact an administrator.");
-          return;
-      }
-
-      let score = 0;
+      let totalScore = 0;
       const responses = [];
-      for (const key in value) {
-        if (key.startsWith("assessment_")) {
-          const questionId = key.replace("assessment_", "");
+
+      // Handle MCQ questions
+      for (const section in scoringConfig.sectionWeights) {
+        const sectionConfig = scoringConfig.sectionWeights[section];
+        const questionsInSection = sectionConfig.questions;
+        const weight = sectionConfig.weight;
+        const pointsPerQuestion = weight / questionsInSection.length;
+
+        for (const questionId of questionsInSection) {
           const question = state.assessmentQuestions.find(q => q.id === questionId);
           if (question) {
-            if (!question.fluency_level) {
-                console.error(`[Bot] 'fluency_level' not found for question ${questionId}`);
-                continue;
-            }
-            const answerIndex = parseInt(value[key], 10);
-            const answer = question.options[answerIndex];
-            const isCorrect = answer === question.correctAnswer;
-            const questionScore = isCorrect ? (scoring.scores[question.fluency_level] || 0) : 0;
-            score += questionScore;
+            const answerIndex = parseInt(value[`assessment_${questionId}`], 10);
+            const isCorrect = answerIndex === question.correctAnswerIndex;
+            const score = isCorrect ? pointsPerQuestion : 0;
+            totalScore += score;
             responses.push({
               questionId: questionId,
-              answer: answer,
+              answerIndex: answerIndex,
               isCorrect: isCorrect,
-              score: questionScore
+              score: score
             });
           }
+        }
+      }
+
+      // Handle self-assessment questions
+      const selfAssessmentQuestions = state.assessmentQuestions.filter(q => q.type === 'self_assessment' || q.type === 'usage_frequency');
+      for (const question of selfAssessmentQuestions) {
+        const selectedValue = value[`assessment_${question.id}`];
+        const selectedOption = question.options.find(o => o.value === selectedValue);
+        if (selectedOption) {
+          totalScore += selectedOption.score;
+          responses.push({
+            questionId: question.id,
+            selectedValue: selectedValue,
+            score: selectedOption.score
+          });
         }
       }
 
@@ -893,13 +896,13 @@ class TeamsBot extends TeamsActivityHandler {
         id: `${userId}-${new Date().getTime()}`,
         userId: userId,
         responses: responses,
-        fluencyScore: score,
+        fluencyScore: Math.round(totalScore),
         timestamp: new Date().toISOString()
       };
 
       await containers.assessmentresponse.items.create(assessmentResponse);
 
-      const resultsCard = buildAssessmentResultsCard(score);
+      const resultsCard = buildAssessmentResultsCard(Math.round(totalScore));
       await context.sendActivity({ attachments: [resultsCard] });
 
     } catch (error) {
