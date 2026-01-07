@@ -459,6 +459,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       const state = await this.quizState.get(context, {
         inQuiz: false,
+        assessmentCompleted: false,
         microLearningId: null,
         microLearningStatus: "available",
         microLearningQuizzes: [],
@@ -508,7 +509,7 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       let assignment = null;
-      if (hasCompletedAssessment) {
+      if (state.assessmentCompleted) {
         await this.assignFirstLearningModule(context, userId);
 
         assignment = await fetchAssignment(userId);
