@@ -5,7 +5,6 @@ const { containers } = require("./lib/cosmos");
 const { syncLearningAssignment } = require("./lib/learningPlan.js");
 const { fetchResponseProgress, saveResponseProgress } = require("./lib/learningProgress.js");
 const { awardXpAction } = require("./lib/rewards.js");
-const { computeStartTimestamp } = require("./lib/utils.js");
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
 const httpFetch = (...args) =>
@@ -16,9 +15,6 @@ const httpFetch = (...args) =>
 const HOURS_TO_MS = 60 * 60 * 1000;
 const LEARNING_START_DELAY_MINUTES = Number(
   process.env.MICRO_LEARNING_START_DELAY_MINUTES ?? process.env.AI_LEARNING_START_DELAY_MINUTES ?? 0
-);
-const USAGE_START_DELAY_MINUTES = Number(
-  process.env.MICRO_USAGE_START_DELAY_MINUTES ?? process.env.AI_USAGE_START_DELAY_MINUTES ?? 0
 );
 const NEXT_LEARNING_DELAY_HOURS = Number(
   process.env.MICRO_LEARNING_NEXT_DELAY_HOURS ?? process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 24
@@ -41,18 +37,48 @@ async function loadLearningEntry(userId, learningId) {
   }
 }
 
+function getQuizPassedTimestamp(entry) {
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.quizPassedAt) {
+    return entry.quizPassedAt;
+  }
+
+  if (!Array.isArray(entry.attempts)) {
+    return null;
+  }
+
+  const passedAttempts = entry.attempts
+    .map((attempt) => {
+      if (!attempt || attempt.result !== "passed") {
+        return null;
+      }
+      return attempt.submittedAt || attempt.completedAt || attempt.assignedAt || null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+
+  return passedAttempts[0] || null;
+}
+
+function hasPassedQuiz(entry) {
+  return Boolean(getQuizPassedTimestamp(entry));
+}
+
 function findUsageEligibleLearning(progressDoc) {
   if (!progressDoc || !Array.isArray(progressDoc.learnings)) {
     return null;
   }
 
   const sorted = [...progressDoc.learnings].sort((a, b) => {
-    const timeA = new Date(a.quizPassedAt || a.completedAt || 0).getTime();
-    const timeB = new Date(b.quizPassedAt || b.completedAt || 0).getTime();
+    const timeA = new Date(getQuizPassedTimestamp(a) || a.completedAt || 0).getTime();
+    const timeB = new Date(getQuizPassedTimestamp(b) || b.completedAt || 0).getTime();
     return timeB - timeA;
   });
 
-  return sorted.find((entry) => entry.quizPassedAt && !(entry.survey?.submittedAt));
+  return sorted.find((entry) => hasPassedQuiz(entry) && !(entry.survey?.submittedAt));
 }
 
 
@@ -129,8 +155,9 @@ function buildLearningSummaryCard(assignment) {
   if (assignment.completedAt) {
     statusFacts.push({ title: "Completed", value: new Date(assignment.completedAt).toLocaleString() });
   }
-  if (assignment.quizPassedAt) {
-    statusFacts.push({ title: "Quiz", value: `Passed ${new Date(assignment.quizPassedAt).toLocaleString()}` });
+  const quizPassedTimestamp = getQuizPassedTimestamp(assignment);
+  if (quizPassedTimestamp) {
+    statusFacts.push({ title: "Quiz", value: `Passed ${new Date(quizPassedTimestamp).toLocaleString()}` });
   }
 
   const body = [
@@ -413,20 +440,33 @@ async function fetchAssignment(userId) {
     }
 
     const activeLearning = userResponse.learnings.find(
-      (entry) => entry.status !== "completed" || !entry.quizPassedAt
+      (entry) => entry.status !== "completed" || !hasPassedQuiz(entry)
     );
 
     if (!activeLearning) {
       return null;
     }
 
-    const availableAt = activeLearning.availableAt || activeLearning.assignedAt || new Date().toISOString();
+    const normalizedAvailableAt =
+      activeLearning.availableAt ||
+      activeLearning.assignedAt ||
+      activeLearning.createdAt ||
+      new Date().toISOString();
 
-    return {
-      assignment: {
-        ...activeLearning,
-        availableAt,
-        module: activeLearning.module || {
+    let normalizedModule = activeLearning.module;
+    if (!normalizedModule) {
+      // Try to hydrate module details from catalog if missing
+      try {
+        const { resources: catalogModules } = await containers.ai_learning.items
+          .query({ query: "SELECT * FROM c WHERE c.id = @id", parameters: [{ name: "@id", value: activeLearning.learningId }] })
+          .fetchAll();
+        normalizedModule = catalogModules[0] || null;
+      } catch (moduleError) {
+        console.warn("[Bot] Unable to hydrate module metadata", moduleError);
+      }
+
+      normalizedModule =
+        normalizedModule || {
           id: activeLearning.learningId,
           topic: activeLearning.topic || activeLearning.title || "Learning module",
           title: activeLearning.title || activeLearning.topic || activeLearning.learningId,
@@ -434,7 +474,20 @@ async function fetchAssignment(userId) {
           details: activeLearning.details || "",
           level: activeLearning.level || "",
           quizzes: activeLearning.quizzes || [],
-        },
+        };
+    }
+
+    if (!activeLearning.availableAt || !activeLearning.module) {
+      activeLearning.availableAt = activeLearning.availableAt || normalizedAvailableAt;
+      activeLearning.module = activeLearning.module || normalizedModule;
+      await saveResponseProgress(userResponse);
+    }
+
+    return {
+      assignment: {
+        ...activeLearning,
+        availableAt: normalizedAvailableAt,
+        module: normalizedModule,
       },
     };
   } catch (error) {
@@ -676,11 +729,11 @@ class TeamsBot extends TeamsActivityHandler {
           targetLearning = await loadLearningEntry(userId, activeLearning.learningId);
         }
 
-        if (!targetLearning || targetLearning.survey?.submittedAt || !targetLearning.quizPassedAt) {
+        if (!targetLearning || targetLearning.survey?.submittedAt || !hasPassedQuiz(targetLearning)) {
           targetLearning = findUsageEligibleLearning(progress);
         }
 
-        if (!targetLearning) {
+        if (!targetLearning || !hasPassedQuiz(targetLearning)) {
           await context.sendActivity(
             "I couldn't find a completed learning module ready for usage logging yet. Please finish a quiz first."
           );
@@ -689,12 +742,6 @@ class TeamsBot extends TeamsActivityHandler {
 
         if (targetLearning.survey?.submittedAt) {
           await context.sendActivity("You've already logged a usage win for this module. Great job!");
-          return;
-        }
-
-        const usageDelay = buildDelayMessage("Usage logging", targetLearning.usageAvailableAt);
-        if (usageDelay) {
-          await context.sendActivity(usageDelay);
           return;
         }
 
@@ -1137,12 +1184,6 @@ class TeamsBot extends TeamsActivityHandler {
             return;
         }
 
-        const usageDelayMessage = buildDelayMessage("Usage logging", learning.usageAvailableAt);
-        if (usageDelayMessage) {
-            await context.sendActivity(usageDelayMessage);
-            return;
-        }
-
         const submittedAt = new Date();
         const submittedAtIso = submittedAt.toISOString();
 
@@ -1181,7 +1222,7 @@ class TeamsBot extends TeamsActivityHandler {
         learning.usageAvailableAt = null;
 
         let nextAssignmentMessage = null;
-        if (learning.quizPassedAt) {
+        if (hasPassedQuiz(learning)) {
             const currentOrder = learning.module.order;
             const nextOrder = currentOrder + 1;
 
@@ -1303,7 +1344,7 @@ class TeamsBot extends TeamsActivityHandler {
           learning.attempts.push(result);
           if (result.result === "passed") {
             learning.quizPassedAt = new Date().toISOString();
-            learning.usageAvailableAt = computeStartTimestamp(USAGE_START_DELAY_MINUTES);
+            learning.usageAvailableAt = null;
             quizPassed = true;
           }
           await saveResponseProgress(userResponse);
@@ -1470,13 +1511,29 @@ class TeamsBot extends TeamsActivityHandler {
       if (userResponse.learnings && userResponse.learnings.length > 0) {
           const lastLearning = userResponse.learnings[userResponse.learnings.length - 1];
           let lastOrder = lastLearning?.module?.order;
+          let metadataPatched = false;
 
-          if (typeof lastOrder !== "number" && lastLearning?.learningId) {
+          if (lastLearning?.learningId) {
               const matchingModule = modules.find((m) => m.id === lastLearning.learningId);
-              if (matchingModule && typeof matchingModule.order === "number") {
-                  lastOrder = matchingModule.order;
-                  lastLearning.module = lastLearning.module || matchingModule;
+              if (!lastLearning.module && matchingModule) {
+                  lastLearning.module = matchingModule;
+                  metadataPatched = true;
               }
+              if (typeof lastOrder !== "number" && matchingModule && typeof matchingModule.order === "number") {
+                  lastOrder = matchingModule.order;
+              }
+          }
+
+          if (!lastLearning.availableAt) {
+              lastLearning.availableAt =
+                  lastLearning.assignedAt ||
+                  lastLearning.createdAt ||
+                  new Date().toISOString();
+              metadataPatched = true;
+          }
+
+          if (metadataPatched) {
+              await saveResponseProgress(userResponse);
           }
 
           if (typeof lastOrder !== "number") {
