@@ -487,8 +487,7 @@ class TeamsBot extends TeamsActivityHandler {
         );
       }
 
-      // Check if user has taken assessment before allowing other commands
-      // Ensure state is synchronized with DB if currently false
+      // Sync assessment status from DB if currently false in state
       if (!state.assessmentCompleted) {
           const { resources: assessmentResponses } = await containers.assessmentresponse.items
             .query({
@@ -502,17 +501,14 @@ class TeamsBot extends TeamsActivityHandler {
           }
       }
 
-      // Block if truly not completed and trying to do something else
-      if (!state.assessmentCompleted && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
-          await context.sendActivity("Please complete the AI Fluency Diagnostic first by typing `/assessment`.");
-          return;
+      let assignment = await fetchAssignment(userId);
+
+      if (state.assessmentCompleted && !assignment) {
+        await this.assignFirstLearningModule(context, userId);
+        assignment = await fetchAssignment(userId);
       }
 
-      let assignment = null;
-      if (state.assessmentCompleted) {
-        await this.assignFirstLearningModule(context, userId);
-
-        assignment = await fetchAssignment(userId);
+      if (assignment) {
         state.microLearningId = assignment?.assignment?.learningId || state.microLearningId;
         state.microLearningStatus = assignment?.assignment?.status || state.microLearningStatus;
         state.microLearningQuizzes = assignment?.assignment?.module?.quizzes || state.microLearningQuizzes;
@@ -520,7 +516,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       if (text === "start quiz") {
         if (!assignment) {
-          await context.sendActivity("Please complete the AI Fluency Diagnostic first by typing `/assessment`.");
+          await context.sendActivity("I couldn't find a learning module ready for a quiz. Please check `/learning` to see your progress.");
           return;
         }
 
@@ -855,7 +851,7 @@ class TeamsBot extends TeamsActivityHandler {
         learnings: [
           {
             learningId: firstModule.id,
-            status: "assigned",
+            status: "available",
             createdAt: nowIso,
             updatedAt: nowIso,
             availableAt: nowIso, // Instantly available
@@ -984,6 +980,15 @@ class TeamsBot extends TeamsActivityHandler {
 
       const resultsCard = buildAssessmentResultsCard(result.fluencyScore, result.fluencyLevel);
       await context.sendActivity({ attachments: [resultsCard] });
+
+      const helpMessage = `🎉 **Diagnostic Complete!** Here are the commands you can use:
+• \`/learning\` - View your currently assigned AI learning module.
+• \`start quiz\` - Start the quiz for your completed learning module.
+• \`/logusage\` - Capture an "AI win" by logging how you used AI today.
+• \`/myusage\` - View your previous AI usage logs.
+• \`/assessment\` - View your latest diagnostic results.`;
+
+      await context.sendActivity(helpMessage);
 
       const assigned = await this.assignFirstLearningModule(context, userId);
       if (assigned) {

@@ -148,7 +148,7 @@ export async function POST(request) {
                     userId,
                     learnings: [{
                         learningId: nextModule.id,
-                        status: "assigned",
+                        status: "available",
                         createdAt: now.toISOString(),
                         updatedAt: now.toISOString(),
                         availableAt: availableAt,
