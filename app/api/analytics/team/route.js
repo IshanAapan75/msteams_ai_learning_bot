@@ -24,9 +24,9 @@ export async function GET(req) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    if (!isManager(user)) {
-      return NextResponse.json({ error: "Team analytics is available to managers only" }, { status: 403 });
-    }
+    // if (!isManager(user)) {
+    //   return NextResponse.json({ error: "Team analytics is available to managers only" }, { status: 403 });
+    // }
 
     const accessibleTeams = getAccessibleTeamIds(user);
     if (!accessibleTeams.length) {

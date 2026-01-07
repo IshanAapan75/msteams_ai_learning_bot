@@ -51,6 +51,8 @@ function buildOverviewPayload({
       totalXp,
       level,
       streak,
+      fluencyScore: rewards?.fluency || user?.fluencyScore || 0,
+      tier: rewards?.tier || "AI Rookie",
       badges: Array.isArray(rewards?.badges) ? rewards.badges.length : 0,
       lastActionDate: rewards?.lastActionDate || null,
       nextMilestoneXp: progress.nextMilestoneXp,
