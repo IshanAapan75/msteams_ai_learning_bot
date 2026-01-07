@@ -30,13 +30,7 @@ async function loadLearningEntry(userId, learningId) {
     return null;
   }
   try {
-    const { resources } = await containers.responses.items
-      .query({
-        query: "SELECT * FROM c WHERE c.userId = @userId",
-        parameters: [{ name: "@userId", value: userId }],
-      })
-      .fetchAll();
-    const doc = resources?.[0];
+    const doc = await fetchResponseProgress(userId);
     if (!doc || !Array.isArray(doc.learnings)) {
       return null;
     }
@@ -887,7 +881,7 @@ class TeamsBot extends TeamsActivityHandler {
           status: "available",
           createdAt: nowIso,
           updatedAt: nowIso,
-          availableAt: nowIso, // Instantly available
+          availableAt: nowIso,
           module: firstModule,
           attempts: [],
           quizAvailableAt: null,
@@ -1096,17 +1090,13 @@ class TeamsBot extends TeamsActivityHandler {
     }
 
     try {
-        const { resources: userResponses } = await containers.responses.items.query({
-            query: "SELECT * FROM c WHERE c.userId = @userId",
-            parameters: [{ name: "@userId", value: userId }]
-        }).fetchAll();
+        const userResponse = await fetchResponseProgress(userId);
 
-        if (!userResponses || userResponses.length === 0) {
+        if (!userResponse || !Array.isArray(userResponse.learnings)) {
             await context.sendActivity("I couldn't find your learning progress.");
             return;
         }
 
-        const userResponse = userResponses[0];
         const learning = userResponse.learnings.find(l => l.learningId === payload.learningId);
 
         if (!learning) {
@@ -1194,7 +1184,7 @@ class TeamsBot extends TeamsActivityHandler {
             }
         }
         
-        await containers.responses.items.upsert(userResponse);
+        await saveResponseProgress(userResponse);
         if (nextAssignmentMessage) {
             await context.sendActivity(nextAssignmentMessage);
         } else {
@@ -1271,25 +1261,19 @@ class TeamsBot extends TeamsActivityHandler {
           `📊 Quiz complete! Score: ${result.score.correct}/${result.score.total}. Result: ${result.result}.`
         );
 
-        const { resources: userResponses } = await containers.responses.items.query({
-            query: "SELECT * FROM c WHERE c.userId = @userId",
-            parameters: [{ name: "@userId", value: userId }]
-        }).fetchAll();
+        const userResponse = await fetchResponseProgress(userId);
 
         let quizPassed = false;
-        if (userResponses.length > 0) {
-            const userResponse = userResponses[0];
-            const learning = userResponse.learnings.find(l => l.learningId === state.microLearningId);
-            if (learning) {
-                learning.attempts = learning.attempts || [];
-                learning.attempts.push(result);
-                if (result.result === "passed") {
-                    learning.quizPassedAt = new Date().toISOString();
-                    learning.usageAvailableAt = computeStartTimestamp(USAGE_START_DELAY_MINUTES);
-                    quizPassed = true;
-                }
-                await containers.responses.items.upsert(userResponse);
-            }
+        const learning = userResponse?.learnings?.find((entry) => entry.learningId === state.microLearningId);
+        if (learning) {
+          learning.attempts = Array.isArray(learning.attempts) ? learning.attempts : [];
+          learning.attempts.push(result);
+          if (result.result === "passed") {
+            learning.quizPassedAt = new Date().toISOString();
+            learning.usageAvailableAt = computeStartTimestamp(USAGE_START_DELAY_MINUTES);
+            quizPassed = true;
+          }
+          await saveResponseProgress(userResponse);
         }
 
         if (quizPassed) {

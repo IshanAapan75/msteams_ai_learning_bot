@@ -4,6 +4,7 @@ import { computeStartTimestamp } from "../../../../lib/utils";
 import { upsertUserProfile } from "../../../../lib/users";
 import { getXpForLevel } from "../../../../lib/xp";
 import { initializeUserRewards } from "../../../../lib/rewards";
+import { fetchResponseProgress, saveResponseProgress } from "../../../../lib/learningProgress";
 
 const DEFAULT_SCORING_CONFIG = {
     sectionWeights: {
@@ -117,12 +118,9 @@ export async function POST(request) {
     });
     
     // Auto-assign first learning module if it doesn't exist
-    const { resources: userResponses } = await containers.responses.items.query({
-        query: "SELECT * FROM c WHERE c.userId = @userId",
-        parameters: [{ name: "@userId", value: userId }]
-    }).fetchAll();
+    const userResponse = await fetchResponseProgress(userId);
 
-    if (!userResponses || userResponses.length === 0) {
+    if (!userResponse.learnings || userResponse.learnings.length === 0) {
         // Cap the starting content tier at "AI Explorer"
         let effectiveTier = fluencyLevel;
         const highLevels = ['AI Practitioner', 'AI Expert', 'AI Champion'];
@@ -147,23 +145,18 @@ export async function POST(request) {
         if (learningModules.length > 0) {
             const firstModule = learningModules[0];
             const nowIso = new Date().toISOString();
-            const newResponse = {
-                id: `${userId}-${Date.now()}`,
-                userId: userId,
-                learnings: [{
-                    learningId: firstModule.id,
-                    status: "assigned",
-                    createdAt: nowIso,
-                    updatedAt: nowIso,
-                    availableAt: nowIso, // Instantly available
-                    module: firstModule,
-                    attempts: [],
-                    quizAvailableAt: null,
-                    usageAvailableAt: null
-                }],
-                updatedAt: nowIso
-            };
-            await containers.responses.items.create(newResponse);
+            userResponse.learnings = [{
+                learningId: firstModule.id,
+                status: "available",
+                createdAt: nowIso,
+                updatedAt: nowIso,
+                availableAt: nowIso,
+                module: firstModule,
+                attempts: [],
+                quizAvailableAt: null,
+                usageAvailableAt: null
+            }];
+            await saveResponseProgress(userResponse);
         }
     }
 
