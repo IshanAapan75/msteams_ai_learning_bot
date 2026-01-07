@@ -1164,7 +1164,10 @@ class TeamsBot extends TeamsActivityHandler {
         return;
     }
 
-    if (!payload.actionType || !payload.timeSaved || !payload.confidence) {
+    const confidenceValue = payload.survey_confidence ?? payload.confidence;
+    const sentimentValue = payload.survey_sentiment ?? payload.sentiment;
+
+    if (!payload.actionType || !payload.timeSaved || !confidenceValue || !sentimentValue) {
         await context.sendActivity("Please answer all required questions before submitting.");
         return;
     }
@@ -1197,12 +1200,14 @@ class TeamsBot extends TeamsActivityHandler {
                 { id: "actionType", text: "What did you use AI for?" },
                 { id: "timeSaved", text: "How much time did you save?" },
                 { id: "confidence", text: "Confidence in output quality" },
+                { id: "sentiment", text: "How do you feel about AI right now?" },
                 { id: "notes", text: "Brief description" }
             ],
             responses: {
                 actionType: payload.actionType,
                 timeSaved: payload.timeSaved,
-                confidence: payload.confidence,
+                confidence: confidenceValue,
+                sentiment: sentimentValue,
                 notes: payload.notes || null
             }
         };
@@ -1214,7 +1219,8 @@ class TeamsBot extends TeamsActivityHandler {
         learning.survey = {
             actionType: payload.actionType,
             timeSaved: payload.timeSaved,
-            confidence: payload.confidence,
+            confidence: confidenceValue,
+            sentiment: sentimentValue,
             notes: payload.notes || null,
             submittedAt: submittedAtIso
         };
