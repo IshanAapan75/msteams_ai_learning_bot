@@ -397,7 +397,12 @@ async function fetchAssignment(userId) {
             return null;
         }
 
-        let activeLearning = userResponse.learnings.find(l => l.status !== 'completed');
+        // Find the first module that is either:
+        // 1. Not completed yet
+        // 2. Completed but the quiz hasn't been passed yet
+        let activeLearning = userResponse.learnings.find(l => 
+            l.status !== 'completed' || !l.quizPassedAt
+        );
 
         if (!activeLearning) {
             return null;
@@ -490,12 +495,14 @@ class TeamsBot extends TeamsActivityHandler {
             .fetchAll();
           
           if (assessmentResponses.length > 0) {
+              console.log(`[Bot] Assessment found in DB for user: ${userId}. Syncing state.`);
               state.assessmentCompleted = true;
           }
       }
 
       // Automatically trigger assessment for new users
       if (!state.assessmentCompleted && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
+          console.log(`[Bot] User ${userId} has not completed assessment. Triggering diagnostic.`);
           await this.handleAssessmentCommand(context, state, userId);
           await this.conversationState.saveChanges(context);
           return;
@@ -504,17 +511,23 @@ class TeamsBot extends TeamsActivityHandler {
       // Check for current assignment
       let assignment = await fetchAssignment(userId);
 
-      // If assessment is done but NO assignment exists, try to assign the first one
+      // If assessment is done but NO active assignment exists (everything fully cleared), 
+      // check if we need to assign the first one OR the next one
       if (state.assessmentCompleted && !assignment) {
-        console.log(`[Bot] User ${userId} has no assignment. Attempting first assignment...`);
-        const assigned = await this.assignFirstLearningModule(context, userId);
-        if (assigned) {
-            assignment = await fetchAssignment(userId);
+        const userResponse = await fetchResponseProgress(userId);
+        if (!userResponse.learnings || userResponse.learnings.length === 0) {
+            console.log(`[Bot] User ${userId} has no history. Assigning first module.`);
+            await this.assignFirstLearningModule(context, userId);
+        } else {
+            console.log(`[Bot] User ${userId} cleared all tasks. Checking for next module.`);
+            await this.ensureNextLearningQueued(userId);
         }
+        assignment = await fetchAssignment(userId);
       }
 
       if (assignment?.assignment) {
         const active = assignment.assignment;
+        console.log(`[Bot] Assignment state: ID=${active.learningId}, Status=${active.status}`);
         state.microLearningId = active.learningId || state.microLearningId;
         state.microLearningStatus = active.status || state.microLearningStatus;
         state.microLearningQuizzes = active.module?.quizzes || state.microLearningQuizzes;
@@ -607,11 +620,14 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       if (text === "/learning") {
+        console.log(`[Bot] /learning command received from user: ${userId}`);
         if (!assignment?.assignment) {
+          console.log(`[Bot] No active assignment found for user: ${userId} during /learning command.`);
           await context.sendActivity("I couldn't find any learning modules for you yet.");
           return;
         }
 
+        console.log(`[Bot] Rendering learning card for: ${assignment.assignment.learningId}`);
         const startsAt = assignment.assignment.availableAt;
         const delayMessage = buildDelayMessage("Learning", startsAt);
         if (delayMessage) {
@@ -1013,17 +1029,13 @@ class TeamsBot extends TeamsActivityHandler {
     }
 
     try {
-      const { resources: userResponses } = await containers.responses.items.query({
-          query: "SELECT * FROM c WHERE c.userId = @userId",
-          parameters: [{ name: "@userId", value: userId }]
-      }).fetchAll();
+      const userResponse = await fetchResponseProgress(userId);
 
-      if (!userResponses || userResponses.length === 0) {
+      if (!userResponse || !userResponse.learnings) {
           await context.sendActivity("I couldn't find your learning progress.");
           return;
       }
 
-      const userResponse = userResponses[0];
       const learning = userResponse.learnings.find(l => l.learningId === learningId);
 
       if (!learning) {
@@ -1037,7 +1049,7 @@ class TeamsBot extends TeamsActivityHandler {
       learning.quizAvailableAt = null;
       learning.usageAvailableAt = null;
 
-      await containers.responses.items.upsert(userResponse);
+      await saveResponseProgress(userResponse);
 
       await this.awardLearningCompletion(userId, learningId);
 
@@ -1047,9 +1059,6 @@ class TeamsBot extends TeamsActivityHandler {
       await context.sendActivity(
         "✅ **Learning marked complete!**\n\nYou can start the quiz right away by typing `start quiz`."
       );
-
-      // We removed the extra prompts here as per requirements to keep it focused on the quiz.
-
     } catch (error) {
       console.error("[Bot] Failed to mark learning complete", error);
       await context.sendActivity("Sorry, I couldn't update your learning status. Try again later.");
