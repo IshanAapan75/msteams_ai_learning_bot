@@ -501,6 +501,13 @@ class TeamsBot extends TeamsActivityHandler {
           }
       }
 
+      // Automatically trigger assessment for new users
+      if (!state.assessmentCompleted && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
+          await this.handleAssessmentCommand(context, state, userId);
+          await this.conversationState.saveChanges(context);
+          return;
+      }
+
       let assignment = await fetchAssignment(userId);
 
       if (state.assessmentCompleted && !assignment) {
@@ -1400,7 +1407,7 @@ class TeamsBot extends TeamsActivityHandler {
 
   async promptUsageAndWrapUp(context, { ensureNextLearning = false, userId } = {}) {
     await this.promptUsageLogging(context);
-    await this.sendDailyWrapUp(context);
+    await context.sendActivity("✅ Next learning module is assigned. Please come back tomorrow!");
 
     if (ensureNextLearning && userId) {
       await this.ensureNextLearningQueued(userId);
@@ -1414,11 +1421,46 @@ class TeamsBot extends TeamsActivityHandler {
 
     try {
       const existing = await fetchAssignment(userId);
-      if (existing?.assignment) {
+      // If we already have an active/available module, don't queue another
+      if (existing?.assignment && existing.assignment.status !== 'completed') {
         return;
       }
 
-      await syncLearningAssignment(userId, true);
+      // Assign next module with 18 hour delay
+      const catalog = await containers.ai_learning.items.query("SELECT * FROM c ORDER BY c[\"order\"] ASC").fetchAll();
+      const { resources: modules } = catalog;
+      
+      const { resources: userResponses } = await containers.responses.items.query({
+          query: "SELECT * FROM c WHERE c.userId = @userId",
+          parameters: [{ name: "@userId", value: userId }]
+      }).fetchAll();
+
+      if (userResponses.length > 0) {
+          const userResponse = userResponses[0];
+          const lastLearning = userResponse.learnings[userResponse.learnings.length - 1];
+          const lastOrder = lastLearning.module.order;
+          
+          const nextModule = modules.find(m => m.order > lastOrder);
+          if (nextModule) {
+              const now = new Date();
+              const availableAt = new Date(now.getTime() + 18 * 60 * 60 * 1000).toISOString();
+              
+              const nextEntry = {
+                  learningId: nextModule.id,
+                  status: "available",
+                  createdAt: now.toISOString(),
+                  updatedAt: now.toISOString(),
+                  availableAt: availableAt,
+                  module: nextModule,
+                  attempts: [],
+                  quizAvailableAt: null,
+                  usageAvailableAt: null,
+              };
+              
+              userResponse.learnings.push(nextEntry);
+              await containers.responses.items.upsert(userResponse);
+          }
+      }
     } catch (error) {
       console.error("[Bot] Failed to queue next learning", error);
     }
