@@ -391,30 +391,48 @@ function buildFullAssessmentCard(questions = []) {
 }
 
 async function fetchAssignment(userId) {
-    try {
-        const userResponse = await fetchResponseProgress(userId);
-        if (!userResponse || !Array.isArray(userResponse.learnings) || userResponse.learnings.length === 0) {
-            return null;
-        }
-
-        // Find the first module that is either:
-        // 1. Not completed yet
-        // 2. Completed but the quiz hasn't been passed yet
-        let activeLearning = userResponse.learnings.find(l => 
-            l.status !== 'completed' || !l.quizPassedAt
-        );
-
-        if (!activeLearning) {
-            return null;
-        }
-
-        activeLearning.availableAt = activeLearning.availableAt || activeLearning.assignedAt || new Date().toISOString();
-        
-        return { assignment: activeLearning };
-    } catch (error) {
-        console.error("Error fetching assignment:", error);
-        return null;
+  try {
+    // Prefer the normalized assignment which includes module metadata
+    const { assignment } = await syncLearningAssignment(userId);
+    if (assignment) {
+      return { assignment };
     }
+
+    // Fallback to raw progress data if the sync API returned nothing
+    const userResponse = await fetchResponseProgress(userId);
+    if (!userResponse || !Array.isArray(userResponse.learnings) || userResponse.learnings.length === 0) {
+      return null;
+    }
+
+    const activeLearning = userResponse.learnings.find(
+      (entry) => entry.status !== "completed" || !entry.quizPassedAt
+    );
+
+    if (!activeLearning) {
+      return null;
+    }
+
+    const availableAt = activeLearning.availableAt || activeLearning.assignedAt || new Date().toISOString();
+
+    return {
+      assignment: {
+        ...activeLearning,
+        availableAt,
+        module: activeLearning.module || {
+          id: activeLearning.learningId,
+          topic: activeLearning.topic || activeLearning.title || "Learning module",
+          title: activeLearning.title || activeLearning.topic || activeLearning.learningId,
+          description: activeLearning.description || "",
+          details: activeLearning.details || "",
+          level: activeLearning.level || "",
+          quizzes: activeLearning.quizzes || [],
+        },
+      },
+    };
+  } catch (error) {
+    console.error("Error fetching assignment:", error);
+    return null;
+  }
 }
 
 async function getUserProfile(userId) {
