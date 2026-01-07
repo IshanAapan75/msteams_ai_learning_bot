@@ -41,6 +41,20 @@ async function loadLearningEntry(userId, learningId) {
   }
 }
 
+function findUsageEligibleLearning(progressDoc) {
+  if (!progressDoc || !Array.isArray(progressDoc.learnings)) {
+    return null;
+  }
+
+  const sorted = [...progressDoc.learnings].sort((a, b) => {
+    const timeA = new Date(a.quizPassedAt || a.completedAt || 0).getTime();
+    const timeB = new Date(b.quizPassedAt || b.completedAt || 0).getTime();
+    return timeB - timeA;
+  });
+
+  return sorted.find((entry) => entry.quizPassedAt && !(entry.survey?.submittedAt));
+}
+
 
 
 function buildDelayMessage(label, timestampIso) {
@@ -654,37 +668,37 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       if (text === "/logusage") {
+        const progress = await fetchResponseProgress(userId);
         const activeLearning = assignment?.assignment;
-        const candidateLearningId = activeLearning?.learningId || state.microLearningId;
+        let targetLearning = null;
 
-        if (!candidateLearningId) {
+        if (activeLearning?.learningId) {
+          targetLearning = await loadLearningEntry(userId, activeLearning.learningId);
+        }
+
+        if (!targetLearning || targetLearning.survey?.submittedAt || !targetLearning.quizPassedAt) {
+          targetLearning = findUsageEligibleLearning(progress);
+        }
+
+        if (!targetLearning) {
           await context.sendActivity(
-            "I couldn't find a learning module to log usage for yet. Please complete a module first."
+            "I couldn't find a completed learning module ready for usage logging yet. Please finish a quiz first."
           );
           return;
         }
 
-        const learningEntry = await loadLearningEntry(userId, candidateLearningId);
-        if (!learningEntry) {
-          await context.sendActivity(
-            "I couldn't find that learning module in your plan. Please complete a learning module first."
-          );
-          return;
-        }
-
-        if (!learningEntry.quizPassedAt) {
-          await context.sendActivity(
-            "Complete the quiz for your current learning module before logging a usage win."
-          );
-          return;
-        }
-
-        if (learningEntry.survey?.submittedAt) {
+        if (targetLearning.survey?.submittedAt) {
           await context.sendActivity("You've already logged a usage win for this module. Great job!");
           return;
         }
 
-        const surveyCard = buildSurveyCard(learningEntry.learningId);
+        const usageDelay = buildDelayMessage("Usage logging", targetLearning.usageAvailableAt);
+        if (usageDelay) {
+          await context.sendActivity(usageDelay);
+          return;
+        }
+
+        const surveyCard = buildSurveyCard(targetLearning.learningId);
         await context.sendActivity({ attachments: [surveyCard] });
         return;
       }
