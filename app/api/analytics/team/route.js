@@ -34,9 +34,15 @@ export async function GET(req) {
     }
 
     const resolvedTeamId = teamId && accessibleTeams.includes(teamId) ? teamId : accessibleTeams[0];
-    const team = await getTeamById(resolvedTeamId);
+    let team = await getTeamById(resolvedTeamId);
+    
+    // If team metadata doesn't exist in 'teams' container, use a fallback
     if (!team) {
-      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+      team = {
+        id: resolvedTeamId,
+        name: user.teamName || "General Team",
+        score: 0
+      };
     }
 
     const members = await fetchTeamMembers(resolvedTeamId);

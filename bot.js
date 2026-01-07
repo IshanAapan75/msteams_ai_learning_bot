@@ -402,8 +402,10 @@ async function fetchAssignment(userId) {
         }
 
         const userResponse = userResponses[0];
-        const activeLearning = userResponse.learnings.find(l => l.status !== 'completed');
+        // Find the first module that is not completed
+        let activeLearning = userResponse.learnings.find(l => l.status !== 'completed');
 
+        // If all are completed, we have no current assignment
         if (!activeLearning) {
             return null;
         }
@@ -508,17 +510,23 @@ class TeamsBot extends TeamsActivityHandler {
           return;
       }
 
+      // Check for current assignment
       let assignment = await fetchAssignment(userId);
 
+      // If assessment is done but NO assignment exists, try to assign the first one
       if (state.assessmentCompleted && !assignment) {
-        await this.assignFirstLearningModule(context, userId);
-        assignment = await fetchAssignment(userId);
+        console.log(`[Bot] User ${userId} has no assignment. Attempting first assignment...`);
+        const assigned = await this.assignFirstLearningModule(context, userId);
+        if (assigned) {
+            assignment = await fetchAssignment(userId);
+        }
       }
 
-      if (assignment) {
-        state.microLearningId = assignment?.assignment?.learningId || state.microLearningId;
-        state.microLearningStatus = assignment?.assignment?.status || state.microLearningStatus;
-        state.microLearningQuizzes = assignment?.assignment?.module?.quizzes || state.microLearningQuizzes;
+      if (assignment?.assignment) {
+        const active = assignment.assignment;
+        state.microLearningId = active.learningId || state.microLearningId;
+        state.microLearningStatus = active.status || state.microLearningStatus;
+        state.microLearningQuizzes = active.module?.quizzes || state.microLearningQuizzes;
       }
 
       if (text === "start quiz") {

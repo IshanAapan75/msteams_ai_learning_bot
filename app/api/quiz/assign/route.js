@@ -78,10 +78,11 @@ export async function POST(req) {
       : null;
 
     if (!targetLearning && effectiveLearningId) {
+      // If module is missing from progress, initialize it but do NOT force complete status
       await upsertLearningEntry({
         userId,
         learningId: effectiveLearningId,
-        status: "completed",
+        status: "available", 
         quizIds: manualQuizList,
       });
       targetLearning = await (async () => {
@@ -92,14 +93,14 @@ export async function POST(req) {
 
     if (!targetLearning || targetLearning.status?.toLowerCase() !== "completed") {
       const completedModule = learningRecords.find(
-        (module) => module.id === effectiveLearningId || module.status?.toLowerCase() === "completed"
+        (module) => module.id === effectiveLearningId && module.status?.toLowerCase() === "completed"
       );
 
       if (completedModule) {
         await upsertLearningEntry({
           userId,
           learningId: completedModule.id,
-          status: completedModule.status || "completed",
+          status: "completed",
           quizIds: Array.isArray(completedModule.quizzes) ? completedModule.quizzes : [],
         });
         const reloaded = await fetchResponseProgress(userId);
