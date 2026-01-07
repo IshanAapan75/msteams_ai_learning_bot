@@ -794,6 +794,25 @@ class TeamsBot extends TeamsActivityHandler {
       if (text === "hi") {
         const { assignment, status } = await syncLearningAssignment(userId);
 
+        if (state.assessmentCompleted) {
+          try {
+            const { resources: assessmentResponses } = await containers.assessmentresponse.items
+              .query({
+                query: "SELECT * FROM c WHERE c.userId = @userId ORDER BY c.timestamp DESC",
+                parameters: [{ name: "@userId", value: userId }],
+              })
+              .fetchAll();
+
+            if (assessmentResponses.length > 0) {
+              const latest = assessmentResponses[0];
+              const resultsCard = buildAssessmentResultsCard(latest.fluencyScore, latest.fluencyLevel);
+              await context.sendActivity({ attachments: [resultsCard] });
+            }
+          } catch (assessmentError) {
+            console.warn("[Bot] Unable to load assessment results", assessmentError);
+          }
+        }
+
         if (status === "completed") {
           await context.sendActivity("You have completed all available learning modules. Great job!");
         } else if (assignment) {
@@ -1450,7 +1469,20 @@ class TeamsBot extends TeamsActivityHandler {
 
       if (userResponse.learnings && userResponse.learnings.length > 0) {
           const lastLearning = userResponse.learnings[userResponse.learnings.length - 1];
-          const lastOrder = lastLearning.module.order;
+          let lastOrder = lastLearning?.module?.order;
+
+          if (typeof lastOrder !== "number" && lastLearning?.learningId) {
+              const matchingModule = modules.find((m) => m.id === lastLearning.learningId);
+              if (matchingModule && typeof matchingModule.order === "number") {
+                  lastOrder = matchingModule.order;
+                  lastLearning.module = lastLearning.module || matchingModule;
+              }
+          }
+
+          if (typeof lastOrder !== "number") {
+              console.warn("[Bot] Unable to determine module order for next assignment", lastLearning?.learningId);
+              return;
+          }
           
           const nextModule = modules.find(m => m.order > lastOrder);
           if (nextModule) {
