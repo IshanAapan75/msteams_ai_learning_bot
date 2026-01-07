@@ -3,6 +3,7 @@ const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
 const { syncLearningAssignment } = require("./lib/learningPlan.js");
+const { fetchResponseProgress, saveResponseProgress } = require("./lib/learningProgress.js");
 const { awardXpAction } = require("./lib/rewards.js");
 const { computeStartTimestamp } = require("./lib/utils.js");
 const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -391,32 +392,22 @@ function buildFullAssessmentCard(questions = []) {
 
 async function fetchAssignment(userId) {
     try {
-        const querySpec = {
-            query: "SELECT * FROM c WHERE c.userId = @userId",
-            parameters: [{ name: "@userId", value: userId }]
-        };
-        const { resources: userResponses } = await containers.responses.items.query(querySpec).fetchAll();
-
-        if (!userResponses || userResponses.length === 0) {
+        const userResponse = await fetchResponseProgress(userId);
+        if (!userResponse || !Array.isArray(userResponse.learnings) || userResponse.learnings.length === 0) {
             return null;
         }
 
-        const userResponse = userResponses[0];
-        // Find the first module that is not completed
         let activeLearning = userResponse.learnings.find(l => l.status !== 'completed');
 
-        // If all are completed, we have no current assignment
         if (!activeLearning) {
             return null;
         }
 
         activeLearning.availableAt = activeLearning.availableAt || activeLearning.assignedAt || new Date().toISOString();
         
-        // The original function returned an object with an 'assignment' property.
-        // I will replicate that structure.
         return { assignment: activeLearning };
     } catch (error) {
-        console.error("Error fetching assignment from responses container:", error);
+        console.error("Error fetching assignment:", error);
         return null;
     }
 }
@@ -797,7 +788,7 @@ class TeamsBot extends TeamsActivityHandler {
           await this.ensureUserExists(context, member.id, member.name);
           const displayName = member?.name || member?.givenName || context.activity.from?.name || "there";
           await context.sendActivity(
-            `👋 **Welcome to Momentum by AI Champions, ${displayName}!**\nI'll assign your first microlearning shortly.`
+            `👋 **Welcome to Momentum by AI Champions, ${displayName}!**\nLet's build your AI fluency together.`
           );
         }
       }
@@ -811,14 +802,9 @@ class TeamsBot extends TeamsActivityHandler {
     }
 
     try {
-      const { resources: userResponses } = await containers.responses.items
-        .query({
-          query: "SELECT * FROM c WHERE c.userId = @userId",
-          parameters: [{ name: "@userId", value: userId }],
-        })
-        .fetchAll();
+      const userResponse = await fetchResponseProgress(userId);
 
-      if (userResponses && userResponses.length > 0) {
+      if (userResponse.learnings && userResponse.learnings.length > 0) {
         return false;
       }
 
@@ -860,26 +846,23 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       const nowIso = new Date().toISOString();
-      const newResponse = {
-        id: `${userId}-${Date.now()}`,
-        userId,
-        learnings: [
-          {
-            learningId: firstModule.id,
-            status: "available",
-            createdAt: nowIso,
-            updatedAt: nowIso,
-            availableAt: nowIso, // Instantly available
-            module: firstModule,
-            attempts: [],
-            quizAvailableAt: null,
-            usageAvailableAt: null,
-          },
-        ],
-        updatedAt: nowIso,
-      };
+      
+      userResponse.learnings = [
+        {
+          learningId: firstModule.id,
+          status: "available",
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          availableAt: nowIso, // Instantly available
+          module: firstModule,
+          attempts: [],
+          quizAvailableAt: null,
+          usageAvailableAt: null,
+        },
+      ];
+      userResponse.updatedAt = nowIso;
 
-      await containers.responses.items.create(newResponse);
+      await saveResponseProgress(userResponse);
       await context.sendActivity(
         `📘 based on your level **${userTier || 'Beginner'}**, I've assigned **${firstModule.title || firstModule.topic}**. Type \`/learning\` to open it.`
       );
@@ -1438,13 +1421,9 @@ class TeamsBot extends TeamsActivityHandler {
       const catalog = await containers.ai_learning.items.query("SELECT * FROM c ORDER BY c[\"order\"] ASC").fetchAll();
       const { resources: modules } = catalog;
       
-      const { resources: userResponses } = await containers.responses.items.query({
-          query: "SELECT * FROM c WHERE c.userId = @userId",
-          parameters: [{ name: "@userId", value: userId }]
-      }).fetchAll();
+      const userResponse = await fetchResponseProgress(userId);
 
-      if (userResponses.length > 0) {
-          const userResponse = userResponses[0];
+      if (userResponse.learnings && userResponse.learnings.length > 0) {
           const lastLearning = userResponse.learnings[userResponse.learnings.length - 1];
           const lastOrder = lastLearning.module.order;
           
@@ -1466,7 +1445,7 @@ class TeamsBot extends TeamsActivityHandler {
               };
               
               userResponse.learnings.push(nextEntry);
-              await containers.responses.items.upsert(userResponse);
+              await saveResponseProgress(userResponse);
           }
       }
     } catch (error) {

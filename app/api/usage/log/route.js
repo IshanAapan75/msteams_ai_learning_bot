@@ -4,6 +4,7 @@ import { awardXpAction } from "../../../../lib/rewards";
 import { upsertUserProfile } from "../../../../lib/users";
 import { initializeUserRewards } from "../../../../lib/rewards";
 import { calculateFluencyScore } from "../../../../lib/fluency";
+import { fetchResponseProgress, saveResponseProgress } from "../../../../lib/learningProgress";
 
 export async function POST(request) {
   try {
@@ -143,24 +144,21 @@ export async function POST(request) {
                 const now = new Date();
                 const availableAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours later
                 
-                const newResponse = {
-                    id: `${userId}-${Date.now()}`,
-                    userId,
-                    learnings: [{
-                        learningId: nextModule.id,
-                        status: "available",
-                        createdAt: now.toISOString(),
-                        updatedAt: now.toISOString(),
-                        availableAt: availableAt,
-                        module: nextModule,
-                        attempts: [],
-                        quizAvailableAt: null,
-                        usageAvailableAt: null
-                    }],
-                    updatedAt: now.toISOString()
+                const userResponse = await fetchResponseProgress(userId);
+                const nextEntry = {
+                    learningId: nextModule.id,
+                    status: "available",
+                    createdAt: now.toISOString(),
+                    updatedAt: now.toISOString(),
+                    availableAt: availableAt,
+                    module: nextModule,
+                    attempts: [],
+                    quizAvailableAt: null,
+                    usageAvailableAt: null
                 };
                 
-                await containers.responses.items.create(newResponse);
+                userResponse.learnings.push(nextEntry);
+                await saveResponseProgress(userResponse);
                 
                 nextModuleInfo = {
                     title: nextModule.title || nextModule.topic,
