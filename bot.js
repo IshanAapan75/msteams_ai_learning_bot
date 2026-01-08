@@ -469,9 +469,11 @@ async function fetchAssignment(userId) {
       return null;
     }
 
-    const activeLearning = userResponse.learnings.find(
-      (entry) => entry.status !== "completed" || !hasPassedQuiz(entry)
-    );
+    const activeLearnings = userResponse.learnings
+      .filter((entry) => entry.status !== "completed" || !hasPassedQuiz(entry))
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+    const activeLearning = activeLearnings[0];
 
     if (!activeLearning) {
       return null;
