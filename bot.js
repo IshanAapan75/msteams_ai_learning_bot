@@ -13,11 +13,41 @@ const httpFetch = (...args) =>
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
 
 const HOURS_TO_MS = 60 * 60 * 1000;
+const moduleCache = new Map();
+
+async function loadModuleDetails(learningId) {
+  if (!learningId) {
+    return null;
+  }
+
+  if (moduleCache.has(learningId)) {
+    return moduleCache.get(learningId);
+  }
+
+  try {
+    const { resource } = await containers.ai_learning.item(learningId, learningId).read();
+    moduleCache.set(learningId, resource || null);
+    return resource || null;
+  } catch (error) {
+    try {
+      const { resources } = await containers.ai_learning.items
+        .query({ query: "SELECT * FROM c WHERE c.id = @id", parameters: [{ name: "@id", value: learningId }] })
+        .fetchAll();
+      const module = resources?.[0] || null;
+      moduleCache.set(learningId, module);
+      return module;
+    } catch (nestedError) {
+      console.warn("[Bot] Unable to load module details", learningId, nestedError);
+      moduleCache.set(learningId, null);
+      return null;
+    }
+  }
+}
 const LEARNING_START_DELAY_MINUTES = Number(
   process.env.MICRO_LEARNING_START_DELAY_MINUTES ?? process.env.AI_LEARNING_START_DELAY_MINUTES ?? 0
 );
 const NEXT_LEARNING_DELAY_HOURS = Number(
-  process.env.MICRO_LEARNING_NEXT_DELAY_HOURS ?? process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 24
+  process.env.MICRO_LEARNING_NEXT_DELAY_HOURS ?? process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 18
 );
 const DEFAULT_LANGUAGE = "English";
 
@@ -1229,38 +1259,57 @@ class TeamsBot extends TeamsActivityHandler {
 
         let nextAssignmentMessage = null;
         if (hasPassedQuiz(learning)) {
-            const currentOrder = learning.module.order;
-            const nextOrder = currentOrder + 1;
+            let currentOrder = learning.module?.order;
+            
+            // If order is missing, try to fetch it from the catalog
+            if (typeof currentOrder !== 'number') {
+                const { resources: modules } = await containers.ai_learning.items.query({
+                    query: "SELECT * FROM c WHERE c.id = @id",
+                    parameters: [{ name: "@id", value: learning.learningId }]
+                }).fetchAll();
+                
+                if (modules.length > 0) {
+                    currentOrder = modules[0].order;
+                    // Patch the module metadata while we are here
+                    learning.module = modules[0];
+                }
+            }
 
-            const { resources: nextModules } = await containers.ai_learning.items.query({
-                query: "SELECT * FROM c WHERE c.order = @order",
-                parameters: [{ name: "@order", value: nextOrder }]
-            }).fetchAll();
+            if (typeof currentOrder === 'number') {
+                const nextOrder = currentOrder + 1;
 
-            if (nextModules.length > 0) {
-                const nextModule = nextModules[0];
-                const submittedAtMs = new Date(submittedAtIso).getTime();
-                const nextAvailableAt = new Date(submittedAtMs + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
-                const nextLearningEntry = {
-                    learningId: nextModule.id,
-                    status: "available",
-                    createdAt: submittedAtIso,
-                    updatedAt: submittedAtIso,
-                    availableAt: nextAvailableAt,
-                    module: nextModule,
-                    attempts: [],
-                    quizAvailableAt: null,
-                    usageAvailableAt: null,
-                };
-                userResponse.learnings.push(nextLearningEntry);
-                state.microLearningId = nextLearningEntry.learningId;
-                state.microLearningStatus = nextLearningEntry.status;
-                state.microLearningQuizzes = Array.isArray(nextModule.quizzes) ? nextModule.quizzes : [];
-                nextAssignmentMessage =
-                    buildDelayMessage("Next learning", nextAvailableAt) ||
-                    "🙌 Logged! Your next learning module will be available soon.";
+                const { resources: nextModules } = await containers.ai_learning.items.query({
+                    query: "SELECT * FROM c WHERE c.order = @order",
+                    parameters: [{ name: "@order", value: nextOrder }]
+                }).fetchAll();
+
+                if (nextModules.length > 0) {
+                    const nextModule = nextModules[0];
+                    const submittedAtMs = new Date(submittedAtIso).getTime();
+                    const nextAvailableAt = new Date(submittedAtMs + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
+                    const nextLearningEntry = {
+                        learningId: nextModule.id,
+                        status: "available",
+                        createdAt: submittedAtIso,
+                        updatedAt: submittedAtIso,
+                        availableAt: nextAvailableAt,
+                        module: nextModule,
+                        attempts: [],
+                        quizAvailableAt: null,
+                        usageAvailableAt: null,
+                    };
+                    userResponse.learnings.push(nextLearningEntry);
+                    state.microLearningId = nextLearningEntry.learningId;
+                    state.microLearningStatus = nextLearningEntry.status;
+                    state.microLearningQuizzes = Array.isArray(nextModule.quizzes) ? nextModule.quizzes : [];
+                    nextAssignmentMessage =
+                        buildDelayMessage("Next learning", nextAvailableAt) ||
+                        "🙌 Logged! Your next learning module will be available soon.";
+                } else {
+                    nextAssignmentMessage = "🙌 Logged! You have completed all available learning modules.";
+                }
             } else {
-                nextAssignmentMessage = "🙌 Logged! You have completed all available learning modules.";
+                console.warn("[Bot] Unable to determine current module order for user:", userId, learning.learningId);
             }
         }
         

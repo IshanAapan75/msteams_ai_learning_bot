@@ -122,7 +122,7 @@ export async function POST(request) {
     if (learningId) {
         const { resource: currentModule } = await containers.ai_learning.item(learningId, learningId).read();
         
-        if (currentModule) {
+        if (currentModule && typeof currentModule.order === 'number') {
             const currentOrder = currentModule.order;
             const currentTier = currentModule.tier || "AI Rookie"; // Default tier
             
