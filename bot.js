@@ -477,11 +477,21 @@ async function fetchAssignment(userId) {
       return null;
     }
 
-    const normalizedAvailableAt =
-      activeLearning.availableAt ||
-      activeLearning.assignedAt ||
-      activeLearning.createdAt ||
-      new Date().toISOString();
+    // Fallback: If module metadata or order is missing, fetch it from catalog
+    if (!activeLearning.module || typeof activeLearning.module.order !== 'number') {
+        const { resources } = await containers.ai_learning.items.query({
+            query: "SELECT * FROM c WHERE c.id = @id",
+            parameters: [{ name: "@id", value: activeLearning.learningId }]
+        }).fetchAll();
+        
+        if (resources.length > 0) {
+            activeLearning.module = resources[0];
+            // Persist the fix back to the document for future requests
+            await saveResponseProgress(userResponse);
+        }
+    }
+
+    const normalizedAvailableAt = activeLearning.availableAt || activeLearning.assignedAt || new Date().toISOString();
 
     let normalizedModule = activeLearning.module;
     if (!normalizedModule) {
@@ -1257,72 +1267,13 @@ class TeamsBot extends TeamsActivityHandler {
         learning.updatedAt = submittedAtIso;
         learning.usageAvailableAt = null;
 
-        let nextAssignmentMessage = null;
-        if (hasPassedQuiz(learning)) {
-            let currentOrder = learning.module?.order;
-            
-            // If order is missing, try to fetch it from the catalog
-            if (typeof currentOrder !== 'number') {
-                const { resources: modules } = await containers.ai_learning.items.query({
-                    query: "SELECT * FROM c WHERE c.id = @id",
-                    parameters: [{ name: "@id", value: learning.learningId }]
-                }).fetchAll();
-                
-                if (modules.length > 0) {
-                    currentOrder = modules[0].order;
-                    // Patch the module metadata while we are here
-                    learning.module = modules[0];
-                }
-            }
-
-            if (typeof currentOrder === 'number') {
-                const nextOrder = currentOrder + 1;
-
-                const { resources: nextModules } = await containers.ai_learning.items.query({
-                    query: "SELECT * FROM c WHERE c.order = @order",
-                    parameters: [{ name: "@order", value: nextOrder }]
-                }).fetchAll();
-
-                if (nextModules.length > 0) {
-                    const nextModule = nextModules[0];
-                    const submittedAtMs = new Date(submittedAtIso).getTime();
-                    const nextAvailableAt = new Date(submittedAtMs + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
-                    const nextLearningEntry = {
-                        learningId: nextModule.id,
-                        status: "available",
-                        createdAt: submittedAtIso,
-                        updatedAt: submittedAtIso,
-                        availableAt: nextAvailableAt,
-                        module: nextModule,
-                        attempts: [],
-                        quizAvailableAt: null,
-                        usageAvailableAt: null,
-                    };
-                    userResponse.learnings.push(nextLearningEntry);
-                    state.microLearningId = nextLearningEntry.learningId;
-                    state.microLearningStatus = nextLearningEntry.status;
-                    state.microLearningQuizzes = Array.isArray(nextModule.quizzes) ? nextModule.quizzes : [];
-                    nextAssignmentMessage =
-                        buildDelayMessage("Next learning", nextAvailableAt) ||
-                        "🙌 Logged! Your next learning module will be available soon.";
-                } else {
-                    nextAssignmentMessage = "🙌 Logged! You have completed all available learning modules.";
-                }
-            } else {
-                console.warn("[Bot] Unable to determine current module order for user:", userId, learning.learningId);
-            }
-        }
-        
         await saveResponseProgress(userResponse);
-        if (nextAssignmentMessage) {
-            await context.sendActivity(nextAssignmentMessage);
-        } else {
-            const fallbackUnlock = new Date(new Date(submittedAtIso).getTime() + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
-            const waitingMsg =
-                buildDelayMessage("Next learning", fallbackUnlock) ||
-                "🙌 Logged! Your next learning module will be available soon.";
-            await context.sendActivity(waitingMsg);
-        }
+        
+        const fallbackUnlock = new Date(new Date(submittedAtIso).getTime() + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
+        const waitingMsg =
+            buildDelayMessage("Next learning", fallbackUnlock) ||
+            "🙌 Logged! Your next learning module will be available soon.";
+        await context.sendActivity(waitingMsg);
 
         await this.awardUsageLogging(userId, learning.learningId, payload);
 
