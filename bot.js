@@ -2,7 +2,7 @@ const { TeamsActivityHandler, CardFactory } = require("botbuilder");
 const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
-const { syncLearningAssignment } = require("./lib/learningPlan.js");
+const { syncLearningAssignment, recordSurveyAndAssignNext } = require("./lib/learningPlan.js");
 const { fetchResponseProgress, saveResponseProgress } = require("./lib/learningProgress.js");
 const { awardXpAction } = require("./lib/rewards.js");
 const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -192,10 +192,6 @@ function buildLearningSummaryCard(assignment) {
 
   const body = [
     ...lines,
-    {
-      type: "FactSet",
-      facts: statusFacts,
-    },
     {
       type: "TextBlock",
       text: assignment.canStart
@@ -1268,8 +1264,21 @@ class TeamsBot extends TeamsActivityHandler {
         };
         learning.updatedAt = submittedAtIso;
         learning.usageAvailableAt = null;
+        learning.surveyCompletedAt = submittedAtIso;
 
         await saveResponseProgress(userResponse);
+        await recordSurveyAndAssignNext({
+            userId,
+            learningId,
+            survey: {
+                actionType: payload.actionType,
+                timeSaved: payload.timeSaved,
+                confidence: confidenceValue,
+                sentiment: sentimentValue,
+                notes: payload.notes || null,
+                submittedAt: submittedAtIso,
+            },
+        });
         
         const fallbackUnlock = new Date(new Date(submittedAtIso).getTime() + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
         const waitingMsg =
