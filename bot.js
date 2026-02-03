@@ -1499,7 +1499,7 @@ class TeamsBot extends TeamsActivityHandler {
           const nextModule = modules.find(m => m.order > lastOrder);
           if (nextModule) {
               const now = new Date();
-              const availableAt = new Date(now.getTime() + 18 * 60 * 60 * 1000).toISOString();
+              const availableAt = new Date(now.getTime() + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
               
               const nextEntry = {
                   learningId: nextModule.id,
