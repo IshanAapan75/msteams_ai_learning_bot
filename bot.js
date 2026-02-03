@@ -602,14 +602,7 @@ function buildMainMenuCard(assessmentCompleted = false, learningStatus = "availa
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     version: "1.4",
     type: "AdaptiveCard",
-    body: [
-      {
-        type: "TextBlock",
-        text: "How can I help you today?",
-        weight: "bolder",
-        size: "medium"
-      }
-    ],
+    body: [], // Removed header text for a cleaner look
     actions
   });
 }
@@ -837,9 +830,7 @@ class TeamsBot extends TeamsActivityHandler {
         if (member.id !== context.activity.recipient.id) {
           await this.ensureUserExists(context, member.id, member.name);
           const displayName = member?.name || member?.givenName || context.activity.from?.name || "there";
-          await context.sendActivity(
-            `👋 **Welcome to Momentum by AI Champions, ${displayName}!**\nLet's build your AI fluency together.`
-          );
+          await this.replyWithMenu(context, member.id, `👋 **Welcome to Momentum by AI Champions, ${displayName}!**\nLet's build your AI fluency together.`);
         }
       }
       await next();
@@ -847,58 +838,7 @@ class TeamsBot extends TeamsActivityHandler {
   }
 
   async sendMainMenuSuggestedActions(context, assessmentCompleted = false, learningStatus = "available", text = "How can I help you today?") {
-    const actions = [];
-    
-    if (!assessmentCompleted) {
-      actions.push({
-        title: "🧠 Start Assessment",
-        type: ActionTypes.MessageBack,
-        text: "start assessment",
-        displayText: "Start Assessment",
-        value: { action: "trigger_assessment" }
-      });
-    } else {
-      actions.push({
-        title: "📘 View Learning",
-        type: ActionTypes.MessageBack,
-        text: "view learning",
-        displayText: "View Learning",
-        value: { action: "trigger_learning" }
-      });
-
-      if (learningStatus === "completed") {
-        actions.push({
-          title: "🎯 Start Quiz",
-          type: ActionTypes.MessageBack,
-          text: "start quiz",
-          displayText: "Start Quiz",
-          value: { action: "trigger_quiz" }
-        });
-      }
-
-      actions.push({
-        title: "📝 Log AI Win",
-        type: ActionTypes.MessageBack,
-        text: "log ai win",
-        displayText: "Log AI Win",
-        value: { action: "trigger_logusage" }
-      });
-      actions.push({
-        title: "📊 My Usage",
-        type: ActionTypes.MessageBack,
-        text: "my usage",
-        displayText: "My Usage",
-        value: { action: "trigger_myusage" }
-      });
-      actions.push({
-        title: "🔄 Re-take Assessment",
-        type: ActionTypes.MessageBack,
-        text: "re-take assessment",
-        displayText: "Re-take Assessment",
-        value: { action: "trigger_assessment" }
-      });
-    }
-
+    const actions = this.getMenuActions(assessmentCompleted, learningStatus);
     const message = MessageFactory.suggestedActions(actions, text);
     await context.sendActivity(message);
   }
@@ -914,21 +854,26 @@ class TeamsBot extends TeamsActivityHandler {
       const assessmentCompleted = assessmentResponses.length > 0;
       const learningStatus = assignment?.assignment?.status;
       
-      await this.sendMainMenuSuggestedActions(context, assessmentCompleted, learningStatus, text);
+      // Send the text feedback
+      if (text) {
+          await context.sendActivity(text);
+      }
+      
+      // Attach the menu buttons card
+      const menuCard = buildMainMenuCard(assessmentCompleted, learningStatus);
+      await context.sendActivity({ attachments: [menuCard] });
   }
 
   async handleStartQuizCommand(context, state, userId, assignment) {
     if (!assignment) {
-      await context.sendActivity("I couldn't find a learning module ready for a quiz. Please check 'View Learning' to see your progress.");
+      await this.replyWithMenu(context, userId, "I couldn't find a learning module ready for a quiz. Please check 'View Learning' to see your progress.");
       return;
     }
 
     const activeLearning = assignment?.assignment;
 
     if (activeLearning && activeLearning.status !== "completed") {
-      await context.sendActivity(
-        "Please finish the current learning module before starting the quiz. Click 'View Learning' to view it."
-      );
+      await this.replyWithMenu(context, userId, "Please finish the current learning module before starting the quiz. Click 'View Learning' to view it.");
       return;
     }
 
@@ -941,17 +886,13 @@ class TeamsBot extends TeamsActivityHandler {
     }
 
     if (!learningEntry) {
-      await context.sendActivity(
-        "I couldn't find a completed learning module ready for a quiz yet. Please complete a module first."
-      );
+      await this.replyWithMenu(context, userId, "I couldn't find a completed learning module ready for a quiz yet. Please complete a module first.");
       return;
     }
 
     const effectiveStatus = (candidateStatus || learningEntry.status || "").toLowerCase();
     if (effectiveStatus !== "completed") {
-      await context.sendActivity(
-        "Please finish the current learning module before starting the quiz. Click 'View Learning' to view it."
-      );
+      await this.replyWithMenu(context, userId, "Please finish the current learning module before starting the quiz. Click 'View Learning' to view it.");
       return;
     }
 
@@ -976,13 +917,13 @@ class TeamsBot extends TeamsActivityHandler {
 
     if (!res.ok) {
       const errorBody = await res.json().catch(() => ({}));
-      await context.sendActivity(errorBody.error || "I couldn't find a quiz right now.");
+      await this.replyWithMenu(context, userId, errorBody.error || "I couldn't find a quiz right now.");
       return;
     }
 
     const data = await res.json();
     if (!data.quizzes?.length) {
-      await context.sendActivity("No quizzes are ready yet—please check back later.");
+      await this.replyWithMenu(context, userId, "No quizzes are ready yet—please check back later.");
       return;
     }
 
@@ -1005,7 +946,7 @@ class TeamsBot extends TeamsActivityHandler {
     console.log(`[Bot] learning command received from user: ${userId}`);
     if (!assignment?.assignment) {
       console.log(`[Bot] No active assignment found for user: ${userId}`);
-      await context.sendActivity("I couldn't find any learning modules for you yet.");
+      await this.replyWithMenu(context, userId, "I couldn't find any learning modules for you yet.");
       return;
     }
 
@@ -1013,7 +954,7 @@ class TeamsBot extends TeamsActivityHandler {
     const startsAt = assignment.assignment.availableAt;
     const delayMessage = buildDelayMessage("Learning", startsAt);
     if (delayMessage) {
-      await context.sendActivity(delayMessage);
+      await this.replyWithMenu(context, userId, delayMessage);
     }
 
     const card = buildLearningSummaryCard(assignment.assignment);
@@ -1032,7 +973,7 @@ class TeamsBot extends TeamsActivityHandler {
         .fetchAll();
 
       if (!userUsages || userUsages.length === 0) {
-        await context.sendActivity("You haven't logged any AI usage yet. Click 'Log AI Win' to get started!");
+        await this.replyWithMenu(context, userId, "You haven't logged any AI usage yet. Click 'Log AI Win' to get started!");
         return;
       }
 
@@ -1052,11 +993,11 @@ class TeamsBot extends TeamsActivityHandler {
         responseMessage += "\n";
       });
 
-      await context.sendActivity(responseMessage);
+      await this.replyWithMenu(context, userId, responseMessage);
 
     } catch (error) {
       console.error("[Bot] Failed to fetch user usages", error);
-      await context.sendActivity("Sorry, I couldn't retrieve your AI usages right now.");
+      await this.replyWithMenu(context, userId, "Sorry, I couldn't retrieve your AI usages right now.");
     }
   }
 
@@ -1166,9 +1107,10 @@ class TeamsBot extends TeamsActivityHandler {
              levelLabel = scoringConfig.fluencyLevels.find(level => score >= level.range[0] && score <= level.range[1])?.label || "Unknown";
         }
 
-        await context.sendActivity("You have already completed the AI Fluency Diagnostic. Here are your results:");
+        await context.sendActivity("You have already completed the AI Fluency Assessment. Here are your results:");
         const resultsCard = buildAssessmentResultsCard(latestResponse.fluencyScore, levelLabel);
         await context.sendActivity({ attachments: [resultsCard] });
+        await this.replyWithMenu(context, userId, "How else can I help you?");
         return;
       }
 
@@ -1184,7 +1126,7 @@ class TeamsBot extends TeamsActivityHandler {
 
     } catch (error) {
       console.error("[Bot] Failed to handle assessment command", error);
-      await context.sendActivity("Sorry, I ran into an error while trying to start the assessment.");
+      await this.replyWithMenu(context, userId, "Sorry, I ran into an error while trying to start the assessment. How else can I help?");
     }
   }
 
@@ -1250,12 +1192,14 @@ class TeamsBot extends TeamsActivityHandler {
         const assignment = await fetchAssignment(userId);
         if (assignment?.assignment) {
           await this.replyWithMenu(context, userId, "📘 You're all set. Click 'View Learning' to continue with your personalized module.");
+        } else {
+          await this.replyWithMenu(context, userId, "Your assessment is complete! How else can I help?");
         }
       }
 
     } catch (error) {
       console.error("[Bot] Failed to handle full assessment submission", error);
-      await context.sendActivity("Sorry, I ran into an error while submitting your assessment. Please try again.");
+      await this.replyWithMenu(context, userId, "Sorry, I ran into an error while submitting your assessment. Please try again or use the menu below.");
     }
   }
 
@@ -1293,12 +1237,10 @@ class TeamsBot extends TeamsActivityHandler {
       state.microLearningId = learningId;
       state.microLearningStatus = "completed";
 
-      await context.sendActivity(
-        "✅ **Learning marked complete!**\n\nYou can start the quiz right away by typing `start quiz`."
-      );
+      await this.replyWithMenu(context, userId, "✅ **Learning marked complete!**\n\nYou can start the quiz right away by clicking 'Start Quiz'.");
     } catch (error) {
       console.error("[Bot] Failed to mark learning complete", error);
-      await context.sendActivity("Sorry, I couldn't update your learning status. Try again later.");
+      await this.replyWithMenu(context, userId, "Sorry, I couldn't update your learning status. Try again later or explore other options.");
     }
   }
 
@@ -1356,7 +1298,7 @@ class TeamsBot extends TeamsActivityHandler {
 
     } catch (error) {
         console.error("[Bot] Failed to submit survey", error);
-        await context.sendActivity("Something went wrong while saving that. Please try again.");
+        await this.replyWithMenu(context, userId, "Something went wrong while saving that. Please try again.");
     }
   }
 
@@ -1366,7 +1308,7 @@ class TeamsBot extends TeamsActivityHandler {
 
     if (!question) {
       state.inQuiz = false;
-      await context.sendActivity("I lost track of the question set. Let's start over soon.");
+      await this.replyWithMenu(context, userId, "I lost track of the question set. Let's start over soon.");
       return;
     }
 
@@ -1431,7 +1373,7 @@ class TeamsBot extends TeamsActivityHandler {
         }
 
         if (feedback) {
-          await context.sendActivity(feedback);
+          await this.replyWithMenu(context, userId, feedback);
         }
 
         const userResponse = await fetchResponseProgress(userId);
@@ -1454,7 +1396,7 @@ class TeamsBot extends TeamsActivityHandler {
       }
     } catch (error) {
       console.error("[Bot] Error submitting quiz attempt", error);
-      await context.sendActivity("I hit an error while logging your answers. Please try again later.");
+      await this.replyWithMenu(context, userId, "I hit an error while logging your answers. Please try again later.");
     }
 
     state.currentResponses = [];
@@ -1467,9 +1409,7 @@ class TeamsBot extends TeamsActivityHandler {
       state.currentQuiz = state.allQuizzes[state.currentQuizIndex];
       state.questionIndex = 0;
       state.currentResponses = [];
-      await context.sendActivity(
-        `Next quiz: **${state.currentQuiz.title}**. Let's keep going!`
-      );
+      await this.replyWithMenu(context, userId, `Next quiz: **${state.currentQuiz.title}**. Let's keep going!`);
       await this.sendQuestion(context, state);
       return;
     }
@@ -1479,7 +1419,7 @@ class TeamsBot extends TeamsActivityHandler {
     state.allQuizzes = [];
     state.questionIndex = 0;
     state.currentResponses = [];
-    await this.replyWithMenu(context, userId, "How can I help you today?");
+    await this.replyWithMenu(context, userId, "🎉 All quizzes completed! Tell me about your AI win to unlock the next module.");
   }
 
   async ensureUserExists(context, userId, userName) {
@@ -1631,6 +1571,22 @@ class TeamsBot extends TeamsActivityHandler {
     });
 
     await context.sendActivity({ attachments: [card] });
+  }
+
+  getMenuActions(assessmentCompleted, learningStatus) {
+    const actions = [];
+    if (!assessmentCompleted) {
+      actions.push({ title: "🧠 Start Assessment", type: ActionTypes.MessageBack, text: "start assessment", displayText: "Start Assessment", value: { action: "trigger_assessment" } });
+    } else {
+      actions.push({ title: "📘 View Learning", type: ActionTypes.MessageBack, text: "view learning", displayText: "View Learning", value: { action: "trigger_learning" } });
+      if (learningStatus === "completed") {
+        actions.push({ title: "🎯 Start Quiz", type: ActionTypes.MessageBack, text: "start quiz", displayText: "Start Quiz", value: { action: "trigger_quiz" } });
+      }
+      actions.push({ title: "📝 Log AI Win", type: ActionTypes.MessageBack, text: "log ai win", displayText: "Log AI Win", value: { action: "trigger_logusage" } });
+      actions.push({ title: "📊 My Usage", type: ActionTypes.MessageBack, text: "my usage", displayText: "My Usage", value: { action: "trigger_myusage" } });
+      actions.push({ title: "🔄 Re-take Assessment", type: ActionTypes.MessageBack, text: "re-take assessment", displayText: "Re-take Assessment", value: { action: "trigger_assessment" } });
+    }
+    return actions;
   }
 }
 
