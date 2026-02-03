@@ -33,7 +33,7 @@ async function runNotifications() {
 }
 
 /**
- * 1. Unlock Notifications (1m Warning and Unlocked Alert)
+ * 1. Unlock Notifications (2m Warning and Unlocked Alert)
  */
 async function checkUnlockNotifications(user) {
     const progress = await fetchResponseProgress(user.id);
@@ -45,8 +45,8 @@ async function checkUnlockNotifications(user) {
     const now = Date.now();
     const timeUntilUnlock = availableTime - now;
 
-    // A. 1 Minute Warning (Trigger if unlock is between 0 and 1.5 minutes away)
-    if (timeUntilUnlock > 0 && timeUntilUnlock <= (1.5 * MINS_TO_MS)) {
+    // A. 1 Minute Before Unlock Warning (Trigger when 1 minute is left, approx at the 2-minute mark)
+    if (timeUntilUnlock > 0 && timeUntilUnlock <= (1.1 * MINS_TO_MS)) {
         if (!activeLearning.notified17h) {
             await sendProactiveMessage(user, `⏳ Your next learning module "**${activeLearning.module?.title || activeLearning.learningId}**" is about to unlock in about 1 minute! Get ready!`);
             activeLearning.notified17h = true;
@@ -54,7 +54,7 @@ async function checkUnlockNotifications(user) {
         }
     }
 
-    // B. Unlocked Alert (Trigger if availableAt has passed)
+    // B. Unlocked Alert (at 3 minutes)
     if (timeUntilUnlock <= 0) {
         if (!activeLearning.notifiedUnlocked) {
             await sendProactiveMessage(user, `🎉 Good news! Your next learning module "**${activeLearning.module?.title || activeLearning.learningId}**" is now UNLOCKED and ready for you.`);
@@ -65,7 +65,7 @@ async function checkUnlockNotifications(user) {
 }
 
 /**
- * 2. Streak Protection (Modified for fast test: 5 mins)
+ * 2. Streak Protection (Testing: 10 mins)
  */
 async function checkStreakNotification(user) {
     if (!user.lastActivityAt) return;
@@ -73,9 +73,9 @@ async function checkStreakNotification(user) {
     const lastActivity = new Date(user.lastActivityAt).getTime();
     const idleTime = Date.now() - lastActivity;
 
-    if (idleTime >= (5 * MINS_TO_MS) && idleTime < (10 * MINS_TO_MS)) {
+    if (idleTime >= (10 * MINS_TO_MS) && idleTime < (15 * MINS_TO_MS)) {
         if (!user.notifiedStreak20h) {
-            await sendProactiveMessage(user, `🔥 Don't let your streak cool down! You haven't checked in for 5 minutes. Jump back in to keep your momentum going!`);
+            await sendProactiveMessage(user, `🔥 Don't let your streak cool down! Jump back in to keep your momentum going!`);
             user.notifiedStreak20h = true;
             await containers.users.item(user.id, user.id).replace(user);
         }
@@ -88,7 +88,7 @@ async function checkStreakNotification(user) {
 }
 
 /**
- * 3. Usage Reminder (3m after ANY activity)
+ * 3. Usage Reminder (4m after ANY activity)
  */
 async function checkUsageReminder(user) {
     if (!user.lastActivityAt) return;
@@ -100,10 +100,10 @@ async function checkUsageReminder(user) {
     const idleTimeSinceActivity = now - lastActivity;
     const timeSinceLastUsage = now - lastUsage;
 
-    if (idleTimeSinceActivity >= (3 * MINS_TO_MS) && idleTimeSinceActivity < (6 * MINS_TO_MS)) {
-        if (timeSinceLastUsage >= (3 * MINS_TO_MS)) {
+    if (idleTimeSinceActivity >= (4 * MINS_TO_MS) && idleTimeSinceActivity < (7 * MINS_TO_MS)) {
+        if (timeSinceLastUsage >= (4 * MINS_TO_MS)) {
             if (!user.notifiedUsage4h) {
-                await sendProactiveMessage(user, `💡 It's been 3 minutes since your last activity. Don't forget to log any "AI Usage" you've had!`);
+                await sendProactiveMessage(user, `💡 It's been 4 minutes since your last activity. Don't forget to log any "AI Usage" you've had!`);
                 user.notifiedUsage4h = true;
                 await containers.users.item(user.id, user.id).replace(user);
             }

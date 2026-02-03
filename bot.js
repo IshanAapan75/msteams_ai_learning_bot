@@ -2,7 +2,7 @@ const { TeamsActivityHandler, CardFactory, MessageFactory, ActionTypes, TurnCont
 const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
-const { syncLearningAssignment, recordSurveyAndAssignNext } = require("./lib/learningPlan.js");
+const { syncLearningAssignment, recordSurveyAndAssignNext, COOLDOWN_MS } = require("./lib/learningPlan.js");
 const { fetchResponseProgress, saveResponseProgress } = require("./lib/learningProgress.js");
 const { awardXpAction } = require("./lib/rewards.js");
 const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -12,7 +12,6 @@ const httpFetch = (...args) =>
     ? fetch(...args)
     : import("node-fetch").then(({ default: fetchImpl }) => fetchImpl(...args));
 
-const HOURS_TO_MS = 60 * 60 * 1000;
 const moduleCache = new Map();
 
 async function loadModuleDetails(learningId) {
@@ -43,12 +42,8 @@ async function loadModuleDetails(learningId) {
     }
   }
 }
-const LEARNING_START_DELAY_MINUTES = Number(
-  process.env.MICRO_LEARNING_START_DELAY_MINUTES ?? process.env.AI_LEARNING_START_DELAY_MINUTES ?? 0
-);
-const NEXT_LEARNING_DELAY_HOURS = Number(
-  process.env.MICRO_LEARNING_NEXT_DELAY_HOURS ?? process.env.AI_NEXT_LEARNING_DELAY_HOURS ?? 18
-);
+const LEARNING_START_DELAY_MINUTES = 0;
+const NEXT_LEARNING_DELAY_MS = COOLDOWN_MS;
 const DEFAULT_LANGUAGE = "English";
 
 async function loadLearningEntry(userId, learningId) {
@@ -1054,7 +1049,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       // 1. Always find the first module in the catalog (Order 1)
       const { resources: modules } = await containers.ai_learning.items.query({
-          query: "SELECT * FROM c ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1"
+          query: "SELECT * FROM c WHERE c[\"order\"] = 1"
       }).fetchAll();
       
       const firstModule = modules[0];
@@ -1400,11 +1395,9 @@ class TeamsBot extends TeamsActivityHandler {
         }
 
         if (result.result === "passed") {
-            await this.replyWithMenu(context, userId, feedback + "✅ Well done! You've passed the quiz.");
-            await this.promptUsageAndWrapUp(context, { userId });
+            context.turnState.set("quiz_feedback", feedback + "✅ Well done! You've passed the quiz.");
         } else {
-            await this.replyWithMenu(context, userId, feedback + "❌ You didn't pass this time, but you can try again or move to the next module.");
-            await this.promptUsageAndWrapUp(context, { userId });
+            context.turnState.set("quiz_feedback", feedback + "❌ You didn't pass this time, but you can try again or move to the next module.");
         }
       }
     } catch (error) {
@@ -1422,7 +1415,8 @@ class TeamsBot extends TeamsActivityHandler {
       state.currentQuiz = state.allQuizzes[state.currentQuizIndex];
       state.questionIndex = 0;
       state.currentResponses = [];
-      await this.replyWithMenu(context, userId, `Next quiz: **${state.currentQuiz.title}**. Let's keep going!`);
+      const feedback = context.turnState.get("quiz_feedback") || "";
+      await this.replyWithMenu(context, userId, `${feedback}\n\nNext quiz: **${state.currentQuiz.title}**. Let's keep going!`);
       await this.sendQuestion(context, state);
       return;
     }
@@ -1432,7 +1426,8 @@ class TeamsBot extends TeamsActivityHandler {
     state.allQuizzes = [];
     state.questionIndex = 0;
     state.currentResponses = [];
-    await this.replyWithMenu(context, userId, "🎉 All quizzes completed! Tell me about your AI win to unlock the next module.");
+    const feedback = context.turnState.get("quiz_feedback") || "";
+    await this.replyWithMenu(context, userId, `${feedback}\n\n🎉 All quizzes completed! Your next module is assigned.`);
   }
 
   async ensureUserExists(context, userId, userName) {
@@ -1525,10 +1520,6 @@ class TeamsBot extends TeamsActivityHandler {
     } catch (error) {
       console.error("[Bot] Failed to award usage XP", error);
     }
-  }
-
-  async promptUsageAndWrapUp(context, { userId } = {}) {
-    await this.replyWithMenu(context, userId, "");
   }
 
   async sendQuestion(context, state) {

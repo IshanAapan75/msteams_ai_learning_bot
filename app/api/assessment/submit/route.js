@@ -123,7 +123,7 @@ export async function POST(request) {
     if (!userResponse.learnings || userResponse.learnings.length === 0) {
         // Strictly pick the module with Order 1
         let { resources: learningModules } = await containers.ai_learning.items.query({
-            query: "SELECT * FROM c ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1"
+            query: "SELECT * FROM c WHERE c[\"order\"] = 1"
         }).fetchAll();
 
         if (learningModules.length > 0) {
