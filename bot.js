@@ -831,8 +831,6 @@ class TeamsBot extends TeamsActivityHandler {
       for (const member of context.activity.membersAdded) {
         if (member.id !== context.activity.recipient.id) {
           await this.ensureUserExists(context, member.id, member.name);
-          const displayName = member?.name || member?.givenName || context.activity.from?.name || "there";
-          await this.replyWithMenu(context, member.id, `👋 **Welcome to Momentum by AI Champions, ${displayName}!**\nLet's build your AI fluency together.`);
         }
       }
       await next();

@@ -121,26 +121,10 @@ export async function POST(request) {
     const userResponse = await fetchResponseProgress(userId);
 
     if (!userResponse.learnings || userResponse.learnings.length === 0) {
-        // Cap the starting content tier at "AI Explorer"
-        let effectiveTier = fluencyLevel;
-        const highLevels = ['AI Practitioner', 'AI Expert', 'AI Champion'];
-        if (highLevels.includes(effectiveTier)) {
-            effectiveTier = 'AI Explorer';
-        }
-
-        // Try to find the correct starting module for this tier
+        // Strictly pick the module with Order 1
         let { resources: learningModules } = await containers.ai_learning.items.query({
-            query: "SELECT * FROM c WHERE c.tier = @tier ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1",
-            parameters: [{ name: "@tier", value: effectiveTier }]
+            query: "SELECT * FROM c ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1"
         }).fetchAll();
-
-        // Fallback to order 1 if no module found for the specific tier
-        if (learningModules.length === 0) {
-             const fallbackRes = await containers.ai_learning.items.query({
-                query: "SELECT * FROM c WHERE c[\"order\"] = 1"
-            }).fetchAll();
-            learningModules = fallbackRes.resources;
-        }
 
         if (learningModules.length > 0) {
             const firstModule = learningModules[0];
