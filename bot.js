@@ -1,4 +1,4 @@
-const { TeamsActivityHandler, CardFactory } = require("botbuilder");
+const { TeamsActivityHandler, CardFactory, MessageFactory, ActionTypes } = require("botbuilder");
 const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
@@ -698,34 +698,28 @@ class TeamsBot extends TeamsActivityHandler {
 
       // Map button actions to existing logic
       const action = context.activity.value?.action;
-      if (action === "trigger_assessment") {
+      if (action === "trigger_assessment" || text === "start assessment" || text === "re-take assessment") {
           await this.handleAssessmentCommand(context, state, userId);
           await this.conversationState.saveChanges(context);
           return;
       }
-      if (action === "trigger_learning") {
+      if (action === "trigger_learning" || text === "view learning") {
           await this.handleLearningCommand(context, userId, assignment);
           return;
       }
-      if (action === "trigger_quiz") {
+      if (action === "trigger_quiz" || text === "start quiz") {
           await this.handleStartQuizCommand(context, state, userId, assignment);
           await this.conversationState.saveChanges(context);
           return;
       }
-      if (action === "trigger_logusage") {
+      if (action === "trigger_logusage" || text === "log ai win") {
           const surveyCard = buildSurveyCard();
           await context.sendActivity({ attachments: [surveyCard] });
           return;
       }
-      if (action === "trigger_myusage") {
+      if (action === "trigger_myusage" || text === "my usage") {
           await this.handleMyUsageCommand(context, userId);
           return;
-      }
-
-      if (text === "start quiz") {
-        await this.handleStartQuizCommand(context, state, userId, assignment);
-        await this.conversationState.saveChanges(context);
-        return;
       }
 
       if (text === "/learning") {
@@ -801,8 +795,7 @@ class TeamsBot extends TeamsActivityHandler {
           await context.sendActivity(
             "👋 Welcome! Please complete your AI Fluency Assessment first to unlock your personalized learning plan."
           );
-          const menuCard = buildMainMenuCard(false, learningStatus);
-          await context.sendActivity({ attachments: [menuCard] });
+          await this.sendMainMenuSuggestedActions(context, false, learningStatus);
           return;
         }
 
@@ -825,8 +818,7 @@ class TeamsBot extends TeamsActivityHandler {
           }
         }
 
-        const menuCard = buildMainMenuCard(true, learningStatus);
-        await context.sendActivity({ attachments: [menuCard] });
+        await this.sendMainMenuSuggestedActions(context, true, learningStatus);
         return;
       }
 
@@ -836,8 +828,7 @@ class TeamsBot extends TeamsActivityHandler {
         );
       } else {
         const learningStatus = assignment?.assignment?.status;
-        const menuCard = buildMainMenuCard(state.assessmentCompleted, learningStatus);
-        await context.sendActivity({ attachments: [menuCard] });
+        await this.sendMainMenuSuggestedActions(context, state.assessmentCompleted, learningStatus);
       }
     });
 
@@ -853,6 +844,51 @@ class TeamsBot extends TeamsActivityHandler {
       }
       await next();
     });
+  }
+
+  async sendMainMenuSuggestedActions(context, assessmentCompleted = false, learningStatus = "available") {
+    const actions = [];
+    
+    if (!assessmentCompleted) {
+      actions.push({
+        title: "🧠 Start Assessment",
+        type: ActionTypes.ImBack,
+        value: "Start Assessment"
+      });
+    } else {
+      actions.push({
+        title: "📘 View Learning",
+        type: ActionTypes.ImBack,
+        value: "View Learning"
+      });
+
+      if (learningStatus === "completed") {
+        actions.push({
+          title: "🎯 Start Quiz",
+          type: ActionTypes.ImBack,
+          value: "Start Quiz"
+        });
+      }
+
+      actions.push({
+        title: "📝 Log AI Win",
+        type: ActionTypes.ImBack,
+        value: "Log AI Win"
+      });
+      actions.push({
+        title: "📊 My Usage",
+        type: ActionTypes.ImBack,
+        value: "My Usage"
+      });
+      actions.push({
+        title: "🔄 Re-take Assessment",
+        type: ActionTypes.ImBack,
+        value: "Re-take Assessment"
+      });
+    }
+
+    const message = MessageFactory.suggestedActions(actions, "How can I help you today?");
+    await context.sendActivity(message);
   }
 
   async handleStartQuizCommand(context, state, userId, assignment) {
@@ -1181,15 +1217,6 @@ class TeamsBot extends TeamsActivityHandler {
       const resultsCard = buildAssessmentResultsCard(result.fluencyScore, result.fluencyLevel);
       await context.sendActivity({ attachments: [resultsCard] });
 
-      const helpMessage = `🎉 **Diagnostic Complete!** Here are the commands you can use:
-• \`/learning\` - View your currently assigned AI learning module.
-• \`start quiz\` - Start the quiz for your completed learning module.
-• \`/logusage\` - Capture an "AI win" by logging how you used AI today.
-• \`/myusage\` - View your previous AI usage logs.
-• \`/assessment\` - View your latest diagnostic results.`;
-
-      await context.sendActivity(helpMessage);
-
       const assigned = await this.assignFirstLearningModule(context, userId);
       if (assigned) {
         await context.sendActivity("📘 Let's get started! Click 'View Learning' to open your first module.");
@@ -1203,8 +1230,7 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       const assignment = await fetchAssignment(userId);
-      const menuCard = buildMainMenuCard(true, assignment?.assignment?.status);
-      await context.sendActivity({ attachments: [menuCard] });
+      await this.sendMainMenuSuggestedActions(context, true, assignment?.assignment?.status);
 
     } catch (error) {
       console.error("[Bot] Failed to handle full assessment submission", error);
@@ -1303,8 +1329,7 @@ class TeamsBot extends TeamsActivityHandler {
         await this.awardUsageLogging(userId, null, payload);
 
         const assignment = await fetchAssignment(userId);
-        const menuCard = buildMainMenuCard(true, assignment?.assignment?.status);
-        await context.sendActivity({ attachments: [menuCard] });
+        await this.sendMainMenuSuggestedActions(context, true, assignment?.assignment?.status);
 
     } catch (error) {
         console.error("[Bot] Failed to submit survey", error);
@@ -1336,7 +1361,7 @@ class TeamsBot extends TeamsActivityHandler {
     }
 
     await this.submitQuizAttempt(context, state, userId);
-    await this.moveToNextQuiz(context, state);
+    await this.moveToNextQuiz(context, state, userId);
 
   }
 
@@ -1367,9 +1392,8 @@ class TeamsBot extends TeamsActivityHandler {
       } else {
         const result = await res.json();
         
-        // Build a detailed feedback message
-        let feedback = `📊 **Quiz Result: ${result.result.toUpperCase()}**\n`;
-        feedback += `Score: ${result.score.correct}/${result.score.total}\n\n`;
+        // Build a detailed feedback message ONLY for failures
+        let feedback = "";
         
         if (result.result !== "passed" && result.responses) {
           feedback += "🔍 **Reviewing your answers:**\n";
@@ -1383,7 +1407,9 @@ class TeamsBot extends TeamsActivityHandler {
           feedback += "\n";
         }
 
-        await context.sendActivity(feedback);
+        if (feedback) {
+          await context.sendActivity(feedback);
+        }
 
         const userResponse = await fetchResponseProgress(userId);
 
@@ -1411,7 +1437,7 @@ class TeamsBot extends TeamsActivityHandler {
     state.currentResponses = [];
   }
 
-  async moveToNextQuiz(context, state) {
+  async moveToNextQuiz(context, state, userId) {
     state.currentQuizIndex = (state.currentQuizIndex || 0) + 1;
 
     if (state.currentQuizIndex < state.allQuizzes.length) {
@@ -1430,12 +1456,8 @@ class TeamsBot extends TeamsActivityHandler {
     state.allQuizzes = [];
     state.questionIndex = 0;
     state.currentResponses = [];
-    await context.sendActivity(
-      "🎉 All quizzes completed! Tell me about your AI win to unlock the next module."
-    );
     const assignment = await fetchAssignment(userId);
-    const menuCard = buildMainMenuCard(true, assignment?.assignment?.status);
-    await context.sendActivity({ attachments: [menuCard] });
+    await this.sendMainMenuSuggestedActions(context, true, assignment?.assignment?.status);
   }
 
   async ensureUserExists(context, userId, userName) {

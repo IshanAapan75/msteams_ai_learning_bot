@@ -159,6 +159,7 @@ export async function POST(req) {
     return NextResponse.json({
       score,
       result,
+      responses: evaluatedResponses,
       xpEarned: rewardResult.xpDelta,
       fluencyScore: rewardRecord.fluency,
       totalXp: xpResult.xp,
