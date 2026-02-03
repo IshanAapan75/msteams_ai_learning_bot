@@ -224,6 +224,12 @@ function buildLearningSummaryCard(assignment) {
 }
 
 function buildSurveyCard(learningId) {
+  const submitData = {
+    action: "submit_survey",
+  };
+  if (learningId) {
+    submitData.learningId = learningId;
+  }
   return CardFactory.adaptiveCard({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     version: "1.4",
@@ -331,10 +337,7 @@ function buildSurveyCard(learningId) {
       {
         type: "Action.Submit",
         title: "Submit",
-        data: {
-          action: "submit_survey",
-          learningId,
-        },
+        data: submitData,
       },
     ],
   });
@@ -759,31 +762,7 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       if (text === "/logusage") {
-        const progress = await fetchResponseProgress(userId);
-        const activeLearning = assignment?.assignment;
-        let targetLearning = null;
-
-        if (activeLearning?.learningId) {
-          targetLearning = await loadLearningEntry(userId, activeLearning.learningId);
-        }
-
-        if (!targetLearning || targetLearning.survey?.submittedAt || !hasPassedQuiz(targetLearning)) {
-          targetLearning = findUsageEligibleLearning(progress);
-        }
-
-        if (!targetLearning || !hasPassedQuiz(targetLearning)) {
-          await context.sendActivity(
-            "I couldn't find a completed learning module ready for usage logging yet. Please finish a quiz first."
-          );
-          return;
-        }
-
-        if (targetLearning.survey?.submittedAt) {
-          await context.sendActivity("You've already logged a usage win for this module. Great job!");
-          return;
-        }
-
-        const surveyCard = buildSurveyCard(targetLearning.learningId);
+        const surveyCard = buildSurveyCard();
         await context.sendActivity({ attachments: [surveyCard] });
         return;
       }
@@ -806,7 +785,9 @@ class TeamsBot extends TeamsActivityHandler {
           userUsages.forEach((usage, index) => {
             responseMessage += `**Usage Entry ${index + 1}:**\n`;
             responseMessage += `  **Timestamp:** ${new Date(usage.timestamp).toLocaleString()}\n`;
-            responseMessage += `  **Learning ID:** ${usage.learningId || 'N/A'}\n`;
+            if (usage.learningId) {
+              responseMessage += `  **Learning ID:** ${usage.learningId}\n`;
+            }
             responseMessage += `  **What did you use AI for?** ${usage.responses.actionType || 'N/A'}\n`;
             responseMessage += `  **How much time did you save?** ${usage.responses.timeSaved || 'N/A'}\n`;
             responseMessage += `  **Confidence in output quality:** ${usage.responses.confidence || 'N/A'}\n`;
@@ -1197,10 +1178,6 @@ class TeamsBot extends TeamsActivityHandler {
 
   async submitSurvey(context, state, userId, payload) {
     const { learningId } = payload;
-    if (!learningId) {
-        await context.sendActivity("Missing learning reference—please try again.");
-        return;
-    }
 
     const confidenceValue = payload.survey_confidence ?? payload.confidence;
     const sentimentValue = payload.survey_sentiment ?? payload.sentiment;
@@ -1211,28 +1188,13 @@ class TeamsBot extends TeamsActivityHandler {
     }
 
     try {
-        const userResponse = await fetchResponseProgress(userId);
-
-        if (!userResponse || !Array.isArray(userResponse.learnings)) {
-            await context.sendActivity("I couldn't find your learning progress.");
-            return;
-        }
-
-        const learning = userResponse.learnings.find(l => l.learningId === payload.learningId);
-
-        if (!learning) {
-            await context.sendActivity("I couldn't find that learning module in your plan.");
-            return;
-        }
-
         const submittedAt = new Date();
         const submittedAtIso = submittedAt.toISOString();
 
         // Create the new usage document
         const usageDoc = {
-            id: `${userId}-${learningId}-${Date.now()}`,
+            id: `${userId}-${Date.now()}`,
             userId: userId,
-            learningId: learningId,
             timestamp: submittedAtIso,
             questions: [
                 { id: "actionType", text: "What did you use AI for?" },
@@ -1250,43 +1212,16 @@ class TeamsBot extends TeamsActivityHandler {
             }
         };
 
+        if (learningId) {
+          usageDoc.learningId = learningId;
+        }
+
         // Save to the new container
         await containers.userusage.items.create(usageDoc);
         
-        // Mark survey as submitted in the original responses document
-        learning.survey = {
-            actionType: payload.actionType,
-            timeSaved: payload.timeSaved,
-            confidence: confidenceValue,
-            sentiment: sentimentValue,
-            notes: payload.notes || null,
-            submittedAt: submittedAtIso
-        };
-        learning.updatedAt = submittedAtIso;
-        learning.usageAvailableAt = null;
-        learning.surveyCompletedAt = submittedAtIso;
+        await context.sendActivity("🙌 Logged! Your AI win has been recorded.");
 
-        await saveResponseProgress(userResponse);
-        await recordSurveyAndAssignNext({
-            userId,
-            learningId,
-            survey: {
-                actionType: payload.actionType,
-                timeSaved: payload.timeSaved,
-                confidence: confidenceValue,
-                sentiment: sentimentValue,
-                notes: payload.notes || null,
-                submittedAt: submittedAtIso,
-            },
-        });
-        
-        const fallbackUnlock = new Date(new Date(submittedAtIso).getTime() + NEXT_LEARNING_DELAY_HOURS * HOURS_TO_MS).toISOString();
-        const waitingMsg =
-            buildDelayMessage("Next learning", fallbackUnlock) ||
-            "🙌 Logged! Your next learning module will be available soon.";
-        await context.sendActivity(waitingMsg);
-
-        await this.awardUsageLogging(userId, learning.learningId, payload);
+        await this.awardUsageLogging(userId, null, payload);
 
     } catch (error) {
         console.error("[Bot] Failed to submit survey", error);
@@ -1468,19 +1403,22 @@ class TeamsBot extends TeamsActivityHandler {
   }
 
   async awardUsageLogging(userId, learningId, payload) {
-    if (!userId || !learningId) {
+    if (!userId) {
       return;
     }
     try {
+      const details = {
+        actionType: payload?.actionType || null,
+        timeSaved: payload?.timeSaved || null,
+      };
+      if (learningId) {
+        details.learningId = learningId;
+      }
       await awardXpAction({
         userId,
         actionType: "ai-usage",
         metadata: {
-          details: {
-            learningId,
-            actionType: payload?.actionType || null,
-            timeSaved: payload?.timeSaved || null,
-          },
+          details,
         },
       });
     } catch (error) {
