@@ -1,4 +1,4 @@
-const { TeamsActivityHandler, CardFactory, MessageFactory, ActionTypes } = require("botbuilder");
+const { TeamsActivityHandler, CardFactory, MessageFactory, ActionTypes, TurnContext } = require("botbuilder");
 const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
@@ -635,7 +635,7 @@ class TeamsBot extends TeamsActivityHandler {
         await upsertUserProfile({
             id: userId,
             lastActivityAt: new Date().toISOString(),
-            conversationReference: TeamsActivityHandler.getConversationReference(context.activity)
+            conversationReference: TurnContext.getConversationReference(context.activity)
         });
       }
 
@@ -1492,7 +1492,7 @@ class TeamsBot extends TeamsActivityHandler {
       teamName: null,
       lastSeenAt: new Date().toISOString(),
       lastActivityAt: new Date().toISOString(),
-      conversationReference: context.activity ? TeamsActivityHandler.getConversationReference(context.activity) : null,
+      conversationReference: context.activity ? TurnContext.getConversationReference(context.activity) : null,
     };
 
     try {
@@ -1518,7 +1518,7 @@ class TeamsBot extends TeamsActivityHandler {
         teamName: teams?.name || teams?.displayName || null,
         lastSeenAt: new Date().toISOString(),
         lastActivityAt: new Date().toISOString(),
-        conversationReference: TeamsActivityHandler.getConversationReference(context.activity),
+        conversationReference: TurnContext.getConversationReference(context.activity),
         manager: null,
         directReports: [],
       };
