@@ -557,6 +557,63 @@ async function updateUserLanguage(userId, language) {
   return res.json();
 }
 
+function buildMainMenuCard(assessmentCompleted = false, learningStatus = "available") {
+  const actions = [];
+  
+  if (!assessmentCompleted) {
+    actions.push({
+      type: "Action.Submit",
+      title: "🧠 Start Assessment",
+      data: { action: "trigger_assessment" }
+    });
+  } else {
+    actions.push({
+      type: "Action.Submit",
+      title: "📘 View Learning",
+      data: { action: "trigger_learning" }
+    });
+
+    if (learningStatus === "completed") {
+      actions.push({
+        type: "Action.Submit",
+        title: "🎯 Start Quiz",
+        data: { action: "trigger_quiz" }
+      });
+    }
+
+    actions.push({
+      type: "Action.Submit",
+      title: "📝 Log AI Win",
+      data: { action: "trigger_logusage" }
+    });
+    actions.push({
+      type: "Action.Submit",
+      title: "📊 My Usage",
+      data: { action: "trigger_myusage" }
+    });
+    actions.push({
+      type: "Action.Submit",
+      title: "🔄 Re-take Assessment",
+      data: { action: "trigger_assessment" }
+    });
+  }
+
+  return CardFactory.adaptiveCard({
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    version: "1.4",
+    type: "AdaptiveCard",
+    body: [
+      {
+        type: "TextBlock",
+        text: "How can I help you today?",
+        weight: "bolder",
+        size: "medium"
+      }
+    ],
+    actions
+  });
+}
+
 class TeamsBot extends TeamsActivityHandler {
   constructor(conversationState) {
     super();
@@ -629,21 +686,7 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       // Check for current assignment
-      let assignment = await fetchAssignment(userId);
-
-      // If assessment is done but NO active assignment exists (everything fully cleared), 
-      // check if we need to assign the first one OR the next one
-      if (state.assessmentCompleted && !assignment) {
-        const userResponse = await fetchResponseProgress(userId);
-        if (!userResponse.learnings || userResponse.learnings.length === 0) {
-            console.log(`[Bot] User ${userId} has no history. Assigning first module.`);
-            await this.assignFirstLearningModule(context, userId);
-        } else {
-            console.log(`[Bot] User ${userId} cleared all tasks. Checking for next module.`);
-            await this.ensureNextLearningQueued(userId);
-        }
-        assignment = await fetchAssignment(userId);
-      }
+      const assignment = await fetchAssignment(userId);
 
       if (assignment?.assignment) {
         const active = assignment.assignment;
@@ -653,111 +696,40 @@ class TeamsBot extends TeamsActivityHandler {
         state.microLearningQuizzes = active.module?.quizzes || state.microLearningQuizzes;
       }
 
+      // Map button actions to existing logic
+      const action = context.activity.value?.action;
+      if (action === "trigger_assessment") {
+          await this.handleAssessmentCommand(context, state, userId);
+          await this.conversationState.saveChanges(context);
+          return;
+      }
+      if (action === "trigger_learning") {
+          await this.handleLearningCommand(context, userId, assignment);
+          return;
+      }
+      if (action === "trigger_quiz") {
+          await this.handleStartQuizCommand(context, state, userId, assignment);
+          await this.conversationState.saveChanges(context);
+          return;
+      }
+      if (action === "trigger_logusage") {
+          const surveyCard = buildSurveyCard();
+          await context.sendActivity({ attachments: [surveyCard] });
+          return;
+      }
+      if (action === "trigger_myusage") {
+          await this.handleMyUsageCommand(context, userId);
+          return;
+      }
+
       if (text === "start quiz") {
-        if (!assignment) {
-          await context.sendActivity("I couldn't find a learning module ready for a quiz. Please check `/learning` to see your progress.");
-          return;
-        }
-
-        const activeLearning = assignment?.assignment;
-
-        if (activeLearning && activeLearning.status !== "completed") {
-          await context.sendActivity(
-            "Please finish the current learning module before starting the quiz. Type `/learning` to view it."
-          );
-          return;
-        }
-
-        const candidateLearningId = activeLearning?.learningId || state.microLearningId;
-        const candidateStatus = activeLearning?.status || state.microLearningStatus;
-
-        let learningEntry = null;
-        if (candidateLearningId) {
-          learningEntry = await loadLearningEntry(userId, candidateLearningId);
-        }
-
-        if (!learningEntry) {
-          await context.sendActivity(
-            "I couldn't find a completed learning module ready for a quiz yet. Please complete a module first."
-          );
-          return;
-        }
-
-        const effectiveStatus = (candidateStatus || learningEntry.status || "").toLowerCase();
-        if (effectiveStatus !== "completed") {
-          await context.sendActivity(
-            "Please finish the current learning module before starting the quiz. Type `/learning` to view it."
-          );
-          return;
-        }
-
-        const derivedLearningId = learningEntry.learningId || candidateLearningId;
-        const derivedQuizzes = activeLearning?.module?.quizzes || learningEntry?.module?.quizzes || state.microLearningQuizzes;
-
-        state.microLearningId = derivedLearningId || state.microLearningId;
-        state.microLearningQuizzes = derivedQuizzes || state.microLearningQuizzes;
-
-        const quizPayload = {
-          userId,
-          fetchAll: true,
-          microLearningId: state.microLearningId,
-          microLearningQuizzes: state.microLearningQuizzes,
-        };
-
-        const res = await httpFetch(`${appUrl}/api/quiz/assign`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(quizPayload),
-        });
-
-        if (!res.ok) {
-          const errorBody = await res.json().catch(() => ({}));
-          await context.sendActivity(errorBody.error || "I couldn't find a quiz right now.");
-          return;
-        }
-
-        const data = await res.json();
-        if (!data.quizzes?.length) {
-          await context.sendActivity("No quizzes are ready yet—please check back later.");
-          return;
-        }
-
-        state.inQuiz = true;
-        state.allQuizzes = data.quizzes;
-        state.currentQuizIndex = 0;
-        state.currentQuiz = data.quizzes[0];
-        state.questionIndex = 0;
-        state.currentResponses = [];
-        state.microLearningId = data.microLearningId;
-        state.microLearningStatus = data.microLearningStatus;
-
-        await context.sendActivity(
-          `🎯 Starting quiz for ${state.currentQuiz.title}. Answer each question to proceed.`
-        );
-        await this.sendQuestion(context, state);
+        await this.handleStartQuizCommand(context, state, userId, assignment);
         await this.conversationState.saveChanges(context);
         return;
       }
 
       if (text === "/learning") {
-        console.log(`[Bot] /learning command received from user: ${userId}`);
-        if (!assignment?.assignment) {
-          console.log(`[Bot] No active assignment found for user: ${userId} during /learning command.`);
-          await context.sendActivity("I couldn't find any learning modules for you yet.");
-          return;
-        }
-
-        console.log(`[Bot] Rendering learning card for: ${assignment.assignment.learningId}`);
-        const startsAt = assignment.assignment.availableAt;
-        const delayMessage = buildDelayMessage("Learning", startsAt);
-        if (delayMessage) {
-          await context.sendActivity(delayMessage);
-        }
-
-        const card = buildLearningSummaryCard(assignment.assignment);
-        if (card) {
-          await context.sendActivity({ attachments: [card] });
-        }
+        await this.handleLearningCommand(context, userId, assignment);
         return;
       }
 
@@ -768,41 +740,7 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       if (text === "/myusage") {
-        try {
-          const { resources: userUsages } = await containers.userusage.items
-            .query({
-              query: "SELECT * FROM c WHERE c.userId = @userId ORDER BY c.timestamp DESC",
-              parameters: [{ name: "@userId", value: userId }],
-            })
-            .fetchAll();
-
-          if (!userUsages || userUsages.length === 0) {
-            await context.sendActivity("You haven't logged any AI usage yet. Use `/logusage` to get started!");
-            return;
-          }
-
-          let responseMessage = "Here are your logged AI usages:\n\n";
-          userUsages.forEach((usage, index) => {
-            responseMessage += `**Usage Entry ${index + 1}:**\n`;
-            responseMessage += `  **Timestamp:** ${new Date(usage.timestamp).toLocaleString()}\n`;
-            if (usage.learningId) {
-              responseMessage += `  **Learning ID:** ${usage.learningId}\n`;
-            }
-            responseMessage += `  **What did you use AI for?** ${usage.responses.actionType || 'N/A'}\n`;
-            responseMessage += `  **How much time did you save?** ${usage.responses.timeSaved || 'N/A'}\n`;
-            responseMessage += `  **Confidence in output quality:** ${usage.responses.confidence || 'N/A'}\n`;
-            if (usage.responses.notes) {
-              responseMessage += `  **Notes:** ${usage.responses.notes}\n`;
-            }
-            responseMessage += "\n";
-          });
-
-          await context.sendActivity(responseMessage);
-
-        } catch (error) {
-          console.error("[Bot] Failed to fetch user usages", error);
-          await context.sendActivity("Sorry, I couldn't retrieve your AI usages right now.");
-        }
+        await this.handleMyUsageCommand(context, userId);
         return;
       }
 
@@ -858,7 +796,15 @@ class TeamsBot extends TeamsActivityHandler {
       }
 
       if (text === "hi") {
-        const { assignment, status } = await syncLearningAssignment(userId);
+        const learningStatus = assignment?.assignment?.status;
+        if (!state.assessmentCompleted) {
+          await context.sendActivity(
+            "👋 Welcome! Please complete your AI Fluency Assessment first to unlock your personalized learning plan."
+          );
+          const menuCard = buildMainMenuCard(false, learningStatus);
+          await context.sendActivity({ attachments: [menuCard] });
+          return;
+        }
 
         if (state.assessmentCompleted) {
           try {
@@ -879,22 +825,8 @@ class TeamsBot extends TeamsActivityHandler {
           }
         }
 
-        if (status === "completed") {
-          await context.sendActivity("You have completed all available learning modules. Great job!");
-        } else if (assignment) {
-          const startsAt = assignment.availableAt;
-          const delayMessage = buildDelayMessage("Next learning", startsAt);
-          if (delayMessage) {
-            await context.sendActivity(delayMessage);
-          } else {
-            const card = buildLearningSummaryCard(assignment);
-            if (card) {
-              await context.sendActivity({ attachments: [card] });
-            }
-          }
-        } else {
-          await context.sendActivity("I couldn't find any learning modules for you yet.");
-        }
+        const menuCard = buildMainMenuCard(true, learningStatus);
+        await context.sendActivity({ attachments: [menuCard] });
         return;
       }
 
@@ -903,9 +835,9 @@ class TeamsBot extends TeamsActivityHandler {
           "You're doing great! Next module will unlock soon. I'll remind you when it's ready."
         );
       } else {
-        await context.sendActivity(
-          "Say `start quiz` when you're ready, or `/learning` to view your assignment."
-        );
+        const learningStatus = assignment?.assignment?.status;
+        const menuCard = buildMainMenuCard(state.assessmentCompleted, learningStatus);
+        await context.sendActivity({ attachments: [menuCard] });
       }
     });
 
@@ -921,6 +853,149 @@ class TeamsBot extends TeamsActivityHandler {
       }
       await next();
     });
+  }
+
+  async handleStartQuizCommand(context, state, userId, assignment) {
+    if (!assignment) {
+      await context.sendActivity("I couldn't find a learning module ready for a quiz. Please check 'View Learning' to see your progress.");
+      return;
+    }
+
+    const activeLearning = assignment?.assignment;
+
+    if (activeLearning && activeLearning.status !== "completed") {
+      await context.sendActivity(
+        "Please finish the current learning module before starting the quiz. Click 'View Learning' to view it."
+      );
+      return;
+    }
+
+    const candidateLearningId = activeLearning?.learningId || state.microLearningId;
+    const candidateStatus = activeLearning?.status || state.microLearningStatus;
+
+    let learningEntry = null;
+    if (candidateLearningId) {
+      learningEntry = await loadLearningEntry(userId, candidateLearningId);
+    }
+
+    if (!learningEntry) {
+      await context.sendActivity(
+        "I couldn't find a completed learning module ready for a quiz yet. Please complete a module first."
+      );
+      return;
+    }
+
+    const effectiveStatus = (candidateStatus || learningEntry.status || "").toLowerCase();
+    if (effectiveStatus !== "completed") {
+      await context.sendActivity(
+        "Please finish the current learning module before starting the quiz. Click 'View Learning' to view it."
+      );
+      return;
+    }
+
+    const derivedLearningId = learningEntry.learningId || candidateLearningId;
+    const derivedQuizzes = activeLearning?.module?.quizzes || learningEntry?.module?.quizzes || state.microLearningQuizzes;
+
+    state.microLearningId = derivedLearningId || state.microLearningId;
+    state.microLearningQuizzes = derivedQuizzes || state.microLearningQuizzes;
+
+    const quizPayload = {
+      userId,
+      fetchAll: true,
+      microLearningId: state.microLearningId,
+      microLearningQuizzes: state.microLearningQuizzes,
+    };
+
+    const res = await httpFetch(`${appUrl}/api/quiz/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(quizPayload),
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({}));
+      await context.sendActivity(errorBody.error || "I couldn't find a quiz right now.");
+      return;
+    }
+
+    const data = await res.json();
+    if (!data.quizzes?.length) {
+      await context.sendActivity("No quizzes are ready yet—please check back later.");
+      return;
+    }
+
+    state.inQuiz = true;
+    state.allQuizzes = data.quizzes;
+    state.currentQuizIndex = 0;
+    state.currentQuiz = data.quizzes[0];
+    state.questionIndex = 0;
+    state.currentResponses = [];
+    state.microLearningId = data.microLearningId;
+    state.microLearningStatus = data.microLearningStatus;
+
+    await context.sendActivity(
+      `🎯 Starting quiz for ${state.currentQuiz.title}. Answer each question to proceed.`
+    );
+    await this.sendQuestion(context, state);
+  }
+
+  async handleLearningCommand(context, userId, assignment) {
+    console.log(`[Bot] learning command received from user: ${userId}`);
+    if (!assignment?.assignment) {
+      console.log(`[Bot] No active assignment found for user: ${userId}`);
+      await context.sendActivity("I couldn't find any learning modules for you yet.");
+      return;
+    }
+
+    console.log(`[Bot] Rendering learning card for: ${assignment.assignment.learningId}`);
+    const startsAt = assignment.assignment.availableAt;
+    const delayMessage = buildDelayMessage("Learning", startsAt);
+    if (delayMessage) {
+      await context.sendActivity(delayMessage);
+    }
+
+    const card = buildLearningSummaryCard(assignment.assignment);
+    if (card) {
+      await context.sendActivity({ attachments: [card] });
+    }
+  }
+
+  async handleMyUsageCommand(context, userId) {
+    try {
+      const { resources: userUsages } = await containers.userusage.items
+        .query({
+          query: "SELECT * FROM c WHERE c.userId = @userId ORDER BY c.timestamp DESC",
+          parameters: [{ name: "@userId", value: userId }],
+        })
+        .fetchAll();
+
+      if (!userUsages || userUsages.length === 0) {
+        await context.sendActivity("You haven't logged any AI usage yet. Click 'Log AI Win' to get started!");
+        return;
+      }
+
+      let responseMessage = "Here are your logged AI usages:\n\n";
+      userUsages.forEach((usage, index) => {
+        responseMessage += `**Usage Entry ${index + 1}:**\n`;
+        responseMessage += `  **Timestamp:** ${new Date(usage.timestamp).toLocaleString()}\n`;
+        if (usage.learningId) {
+          responseMessage += `  **Learning ID:** ${usage.learningId}\n`;
+        }
+        responseMessage += `  **What did you use AI for?** ${usage.responses.actionType || 'N/A'}\n`;
+        responseMessage += `  **How much time did you save?** ${usage.responses.timeSaved || 'N/A'}\n`;
+        responseMessage += `  **Confidence in output quality:** ${usage.responses.confidence || 'N/A'}\n`;
+        if (usage.responses.notes) {
+          responseMessage += `  **Notes:** ${usage.responses.notes}\n`;
+        }
+        responseMessage += "\n";
+      });
+
+      await context.sendActivity(responseMessage);
+
+    } catch (error) {
+      console.error("[Bot] Failed to fetch user usages", error);
+      await context.sendActivity("Sorry, I couldn't retrieve your AI usages right now.");
+    }
   }
 
   async assignFirstLearningModule(context, userId) {
@@ -1117,15 +1192,19 @@ class TeamsBot extends TeamsActivityHandler {
 
       const assigned = await this.assignFirstLearningModule(context, userId);
       if (assigned) {
-        await context.sendActivity("📘 Let's get started! Type `/learning` to open your first module.");
+        await context.sendActivity("📘 Let's get started! Click 'View Learning' to open your first module.");
       } else {
         const assignment = await fetchAssignment(userId);
         if (assignment?.assignment) {
           await context.sendActivity(
-            "📘 You're all set. Type `/learning` to continue with your personalized module."
+            "📘 You're all set. Click 'View Learning' to continue with your personalized module."
           );
         }
       }
+
+      const assignment = await fetchAssignment(userId);
+      const menuCard = buildMainMenuCard(true, assignment?.assignment?.status);
+      await context.sendActivity({ attachments: [menuCard] });
 
     } catch (error) {
       console.error("[Bot] Failed to handle full assessment submission", error);
@@ -1223,6 +1302,10 @@ class TeamsBot extends TeamsActivityHandler {
 
         await this.awardUsageLogging(userId, null, payload);
 
+        const assignment = await fetchAssignment(userId);
+        const menuCard = buildMainMenuCard(true, assignment?.assignment?.status);
+        await context.sendActivity({ attachments: [menuCard] });
+
     } catch (error) {
         console.error("[Bot] Failed to submit survey", error);
         await context.sendActivity("Something went wrong while saving that. Please try again.");
@@ -1283,28 +1366,42 @@ class TeamsBot extends TeamsActivityHandler {
         await context.sendActivity(body.error || "Couldn't submit that quiz. Try again later.");
       } else {
         const result = await res.json();
-        await context.sendActivity(
-          `📊 Quiz complete! Score: ${result.score.correct}/${result.score.total}. Result: ${result.result}.`
-        );
+        
+        // Build a detailed feedback message
+        let feedback = `📊 **Quiz Result: ${result.result.toUpperCase()}**\n`;
+        feedback += `Score: ${result.score.correct}/${result.score.total}\n\n`;
+        
+        if (result.result !== "passed" && result.responses) {
+          feedback += "🔍 **Reviewing your answers:**\n";
+          result.responses.forEach((resp, idx) => {
+            const status = resp.correct ? "✅" : "❌";
+            feedback += `${idx + 1}. ${status} Your answer: *${resp.answer}*\n`;
+            if (!resp.correct) {
+              feedback += `   Correct answer: **${resp.correctAnswer}**\n`;
+            }
+          });
+          feedback += "\n";
+        }
+
+        await context.sendActivity(feedback);
 
         const userResponse = await fetchResponseProgress(userId);
 
-        let quizPassed = false;
         const learning = userResponse?.learnings?.find((entry) => entry.learningId === state.microLearningId);
         if (learning) {
           learning.attempts = Array.isArray(learning.attempts) ? learning.attempts : [];
           learning.attempts.push(result);
+          // Mark as cleared for progression purposes even if they failed, 
+          // but only record the timestamp if they actually passed
           if (result.result === "passed") {
             learning.quizPassedAt = new Date().toISOString();
-            learning.usageAvailableAt = null;
-            quizPassed = true;
           }
+          learning.status = "completed"; // Ensure status is completed to allow next fetch
           await saveResponseProgress(userResponse);
         }
 
-        if (quizPassed) {
-          await this.promptUsageAndWrapUp(context, { userId, ensureNextLearning: true });
-        }
+        // Always prompt usage and wrap up to assign next module
+        await this.promptUsageAndWrapUp(context, { userId });
       }
     } catch (error) {
       console.error("[Bot] Error submitting quiz attempt", error);
@@ -1336,6 +1433,9 @@ class TeamsBot extends TeamsActivityHandler {
     await context.sendActivity(
       "🎉 All quizzes completed! Tell me about your AI win to unlock the next module."
     );
+    const assignment = await fetchAssignment(userId);
+    const menuCard = buildMainMenuCard(true, assignment?.assignment?.status);
+    await context.sendActivity({ attachments: [menuCard] });
   }
 
   async ensureUserExists(context, userId, userName) {
@@ -1436,90 +1536,9 @@ class TeamsBot extends TeamsActivityHandler {
     await context.sendActivity("✅ That's all for today! Come back tomorrow for your next learning drop.");
   }
 
-  async promptUsageAndWrapUp(context, { ensureNextLearning = false, userId } = {}) {
+  async promptUsageAndWrapUp(context, { userId } = {}) {
     await this.promptUsageLogging(context);
     await context.sendActivity("✅ Next learning module is assigned. Please come back tomorrow!");
-
-    if (ensureNextLearning && userId) {
-      await this.ensureNextLearningQueued(userId);
-    }
-  }
-
-  async ensureNextLearningQueued(userId) {
-    if (!userId) {
-      return;
-    }
-
-    try {
-      const existing = await fetchAssignment(userId);
-      // If we already have an active/available module, don't queue another
-      if (existing?.assignment && existing.assignment.status !== 'completed') {
-        return;
-      }
-
-      // Assign next module with 18 hour delay
-      const catalog = await containers.ai_learning.items.query("SELECT * FROM c ORDER BY c[\"order\"] ASC").fetchAll();
-      const { resources: modules } = catalog;
-      
-      const userResponse = await fetchResponseProgress(userId);
-
-      if (userResponse.learnings && userResponse.learnings.length > 0) {
-          const lastLearning = userResponse.learnings[userResponse.learnings.length - 1];
-          let lastOrder = lastLearning?.module?.order;
-          let metadataPatched = false;
-
-          if (lastLearning?.learningId) {
-              const matchingModule = modules.find((m) => m.id === lastLearning.learningId);
-              if (!lastLearning.module && matchingModule) {
-                  lastLearning.module = matchingModule;
-                  metadataPatched = true;
-              }
-              if (typeof lastOrder !== "number" && matchingModule && typeof matchingModule.order === "number") {
-                  lastOrder = matchingModule.order;
-              }
-          }
-
-          if (!lastLearning.availableAt) {
-              lastLearning.availableAt =
-                  lastLearning.assignedAt ||
-                  lastLearning.createdAt ||
-                  new Date().toISOString();
-              metadataPatched = true;
-          }
-
-          if (metadataPatched) {
-              await saveResponseProgress(userResponse);
-          }
-
-          if (typeof lastOrder !== "number") {
-              console.warn("[Bot] Unable to determine module order for next assignment", lastLearning?.learningId);
-              return;
-          }
-          
-          const nextModule = modules.find(m => m.order > lastOrder);
-          if (nextModule) {
-              const now = new Date();
-              const availableAt = new Date(now.getTime()).toISOString();
-              
-              const nextEntry = {
-                  learningId: nextModule.id,
-                  status: "available",
-                  createdAt: now.toISOString(),
-                  updatedAt: now.toISOString(),
-                  availableAt: availableAt,
-                  module: nextModule,
-                  attempts: [],
-                  quizAvailableAt: null,
-                  usageAvailableAt: null,
-              };
-              
-              userResponse.learnings.push(nextEntry);
-              await saveResponseProgress(userResponse);
-          }
-      }
-    } catch (error) {
-      console.error("[Bot] Failed to queue next learning", error);
-    }
   }
 
   async sendQuestion(context, state) {
