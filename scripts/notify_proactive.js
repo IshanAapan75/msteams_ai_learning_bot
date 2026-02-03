@@ -45,8 +45,8 @@ async function checkUnlockNotifications(user) {
     const now = Date.now();
     const timeUntilUnlock = availableTime - now;
 
-    // A. 1 Minute Warning
-    if (timeUntilUnlock > 0 && timeUntilUnlock <= (1.1 * MINS_TO_MS)) {
+    // A. 1 Minute Warning (Trigger if unlock is between 0 and 1.5 minutes away)
+    if (timeUntilUnlock > 0 && timeUntilUnlock <= (1.5 * MINS_TO_MS)) {
         if (!activeLearning.notified17h) {
             await sendProactiveMessage(user, `⏳ Your next learning module "**${activeLearning.module?.title || activeLearning.learningId}**" is about to unlock in about 1 minute! Get ready!`);
             activeLearning.notified17h = true;
@@ -54,7 +54,7 @@ async function checkUnlockNotifications(user) {
         }
     }
 
-    // B. Unlocked Alert
+    // B. Unlocked Alert (Trigger if availableAt has passed)
     if (timeUntilUnlock <= 0) {
         if (!activeLearning.notifiedUnlocked) {
             await sendProactiveMessage(user, `🎉 Good news! Your next learning module "**${activeLearning.module?.title || activeLearning.learningId}**" is now UNLOCKED and ready for you.`);

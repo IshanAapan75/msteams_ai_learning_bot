@@ -688,8 +688,39 @@ class TeamsBot extends TeamsActivityHandler {
         state.microLearningQuizzes = active.module?.quizzes || state.microLearningQuizzes;
       }
 
-      // Map button actions to existing logic
+      // Map button actions and basic greetings first
       const action = context.activity.value?.action;
+      
+      if (text === "hi" || text === "hello") {
+        const learningStatus = assignment?.assignment?.status;
+        if (!state.assessmentCompleted) {
+          await this.replyWithMenu(context, userId, "👋 Welcome! Please complete your AI Fluency Assessment first to unlock your personalized learning plan.");
+          return;
+        }
+
+        if (state.assessmentCompleted) {
+          try {
+            const { resources: assessmentResponses } = await containers.assessmentresponse.items
+              .query({
+                query: "SELECT * FROM c WHERE c.userId = @userId ORDER BY c.timestamp DESC",
+                parameters: [{ name: "@userId", value: userId }],
+              })
+              .fetchAll();
+
+            if (assessmentResponses.length > 0) {
+              const latest = assessmentResponses[0];
+              const resultsCard = buildAssessmentResultsCard(latest.fluencyScore, latest.fluencyLevel);
+              await context.sendActivity({ attachments: [resultsCard] });
+            }
+          } catch (assessmentError) {
+            console.warn("[Bot] Unable to load assessment results", assessmentError);
+          }
+        }
+
+        await this.replyWithMenu(context, userId, "How can I help you today?");
+        return;
+      }
+
       if (action === "trigger_assessment" || text === "start assessment" || text === "re-take assessment") {
           await this.handleAssessmentCommand(context, state, userId);
           await this.conversationState.saveChanges(context);
@@ -789,35 +820,6 @@ class TeamsBot extends TeamsActivityHandler {
         return;
       }
 
-      if (text === "hi") {
-        if (!state.assessmentCompleted) {
-          await this.replyWithMenu(context, userId, "👋 Welcome! Please complete your AI Fluency Assessment first to unlock your personalized learning plan.");
-          return;
-        }
-
-        if (state.assessmentCompleted) {
-          try {
-            const { resources: assessmentResponses } = await containers.assessmentresponse.items
-              .query({
-                query: "SELECT * FROM c WHERE c.userId = @userId ORDER BY c.timestamp DESC",
-                parameters: [{ name: "@userId", value: userId }],
-              })
-              .fetchAll();
-
-            if (assessmentResponses.length > 0) {
-              const latest = assessmentResponses[0];
-              const resultsCard = buildAssessmentResultsCard(latest.fluencyScore, latest.fluencyLevel);
-              await context.sendActivity({ attachments: [resultsCard] });
-            }
-          } catch (assessmentError) {
-            console.warn("[Bot] Unable to load assessment results", assessmentError);
-          }
-        }
-
-        await this.replyWithMenu(context, userId, "How can I help you today?");
-        return;
-      }
-
       if (assignment?.assignment?.canStart === false) {
         await this.replyWithMenu(context, userId, "You're doing great! Next module will unlock soon. I'll remind you when it's ready.");
       } else {
@@ -854,8 +856,8 @@ class TeamsBot extends TeamsActivityHandler {
       const assessmentCompleted = assessmentResponses.length > 0;
       const learningStatus = assignment?.assignment?.status;
       
-      // Send the text feedback
-      if (text) {
+      // Send the text feedback only if provided
+      if (text && text.trim() !== "") {
           await context.sendActivity(text);
       }
       
@@ -1013,40 +1015,15 @@ class TeamsBot extends TeamsActivityHandler {
         return false;
       }
 
-      // 1. Get User's Fluency Level
-      const { resource: userProfile } = await containers.users.item(userId, userId).read();
-      let userTier = userProfile?.fluencyLevel;
-
-      // Cap the starting content tier at "AI Explorer"
-      // Even if they are Practitioner/Expert/Champion, they start at the Explorer track.
-      const highLevels = ['AI Practitioner', 'AI Expert', 'AI Champion'];
-      if (highLevels.includes(userTier)) {
-          userTier = 'AI Explorer';
-      }
-
-      let firstModule = null;
-
-      // 2. Try to find content matching their tier
-      if (userTier) {
-          const { resources: tierModules } = await containers.ai_learning.items.query({
-              query: "SELECT * FROM c WHERE c.tier = @tier ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1",
-              parameters: [{ name: "@tier", value: userTier }]
-          }).fetchAll();
-          
-          if (tierModules.length > 0) {
-              firstModule = tierModules[0];
-          }
-      }
-
-      // 3. Fallback to Day 1 / Default content if no tier match
-      if (!firstModule) {
-          const { resources: defaultModules } = await containers.ai_learning.items
-            .query({ query: "SELECT * FROM c WHERE c.id = 'micro-learning-day-1'" })
-            .fetchAll();
-          firstModule = defaultModules[0];
-      }
+      // 1. Always find the first module in the catalog (Order 1)
+      const { resources: modules } = await containers.ai_learning.items.query({
+          query: "SELECT * FROM c ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1"
+      }).fetchAll();
+      
+      const firstModule = modules[0];
 
       if (!firstModule) {
+        console.warn("[Bot] No modules found in catalog to assign.");
         return false;
       }
 
@@ -1068,9 +1045,7 @@ class TeamsBot extends TeamsActivityHandler {
       userResponse.updatedAt = nowIso;
 
       await saveResponseProgress(userResponse);
-      await context.sendActivity(
-        `📘 based on your level **${userTier || 'Beginner'}**, I've assigned **${firstModule.title || firstModule.topic}**. Type \`/learning\` to open it.`
-      );
+      await this.replyWithMenu(context, userId, `📘 I've assigned your first module: **${firstModule.title || firstModule.topic}**.`);
       return true;
     } catch (error) {
       console.error("[Bot] Failed to assign first learning module", error);
@@ -1355,10 +1330,9 @@ class TeamsBot extends TeamsActivityHandler {
         console.error("[Bot] Quiz submission failed", body.error || res.statusText);
         await context.sendActivity(body.error || "Couldn't submit that quiz. Try again later.");
       } else {
-        const result = await res.json();
-        
-        // Build a detailed feedback message ONLY for failures
-        let feedback = "";
+        // Build a detailed feedback message
+        let feedback = `📊 **Quiz Result: ${result.result.toUpperCase()}**\n`;
+        feedback += `Score: ${result.score.correct}/${result.score.total}\n\n`;
         
         if (result.result !== "passed" && result.responses) {
           feedback += "🔍 **Reviewing your answers:**\n";
@@ -1372,27 +1346,26 @@ class TeamsBot extends TeamsActivityHandler {
           feedback += "\n";
         }
 
-        if (feedback) {
-          await this.replyWithMenu(context, userId, feedback);
-        }
-
         const userResponse = await fetchResponseProgress(userId);
 
         const learning = userResponse?.learnings?.find((entry) => entry.learningId === state.microLearningId);
         if (learning) {
           learning.attempts = Array.isArray(learning.attempts) ? learning.attempts : [];
           learning.attempts.push(result);
-          // Mark as cleared for progression purposes even if they failed, 
-          // but only record the timestamp if they actually passed
           if (result.result === "passed") {
             learning.quizPassedAt = new Date().toISOString();
           }
-          learning.status = "completed"; // Ensure status is completed to allow next fetch
+          learning.status = "completed";
           await saveResponseProgress(userResponse);
         }
 
-        // Always prompt usage and wrap up to assign next module
-        await this.promptUsageAndWrapUp(context, { userId });
+        if (result.result === "passed") {
+            await this.replyWithMenu(context, userId, feedback + "✅ Well done! You've passed the quiz.");
+            await this.promptUsageAndWrapUp(context, { userId });
+        } else {
+            await this.replyWithMenu(context, userId, feedback + "❌ You didn't pass this time, but you can try again or move to the next module.");
+            await this.promptUsageAndWrapUp(context, { userId });
+        }
       }
     } catch (error) {
       console.error("[Bot] Error submitting quiz attempt", error);
@@ -1514,19 +1487,8 @@ class TeamsBot extends TeamsActivityHandler {
     }
   }
 
-  async promptUsageLogging(context) {
-    await context.sendActivity(
-      "📝 Once you're ready, capture today's AI win by typing `/logusage` to log your usage."
-    );
-  }
-
-  async sendDailyWrapUp(context) {
-    await context.sendActivity("✅ That's all for today! Come back tomorrow for your next learning drop.");
-  }
-
   async promptUsageAndWrapUp(context, { userId } = {}) {
-    await this.promptUsageLogging(context);
-    await context.sendActivity("✅ Next learning module is assigned. Please come back tomorrow!");
+    await this.replyWithMenu(context, userId, "");
   }
 
   async sendQuestion(context, state) {
