@@ -630,6 +630,13 @@ class TeamsBot extends TeamsActivityHandler {
         await this.ensureUserExists(context, userId, userName);
         seenUsers.add(userId);
         context.turnState.set("handledUsers", seenUsers);
+      } else {
+        // Just update activity timestamp and reference
+        await upsertUserProfile({
+            id: userId,
+            lastActivityAt: new Date().toISOString(),
+            conversationReference: TeamsActivityHandler.getConversationReference(context.activity)
+        });
       }
 
       const state = await this.quizState.get(context, {
@@ -677,14 +684,6 @@ class TeamsBot extends TeamsActivityHandler {
           }
       }
 
-      // Automatically trigger assessment for new users
-      if (!state.assessmentCompleted && text !== "/assessment" && context.activity.value?.action !== "submit_full_assessment") {
-          console.log(`[Bot] User ${userId} has not completed assessment. Triggering diagnostic.`);
-          await this.handleAssessmentCommand(context, state, userId);
-          await this.conversationState.saveChanges(context);
-          return;
-      }
-
       // Check for current assignment
       const assignment = await fetchAssignment(userId);
 
@@ -719,6 +718,14 @@ class TeamsBot extends TeamsActivityHandler {
       }
       if (action === "trigger_myusage" || text === "my usage") {
           await this.handleMyUsageCommand(context, userId);
+          return;
+      }
+
+      // Automatically trigger assessment for new users (moved after explicit button checks)
+      if (!state.assessmentCompleted && text !== "/assessment" && text !== "hi" && context.activity.value?.action !== "submit_full_assessment") {
+          console.log(`[Bot] User ${userId} has not completed assessment. Triggering diagnostic.`);
+          await this.handleAssessmentCommand(context, state, userId);
+          await this.conversationState.saveChanges(context);
           return;
       }
 
@@ -1324,6 +1331,13 @@ class TeamsBot extends TeamsActivityHandler {
         // Save to the new container
         await containers.userusage.items.create(usageDoc);
         
+        // Update user profile with last usage timestamp
+        await upsertUserProfile({
+            id: userId,
+            lastUsageLogAt: submittedAtIso,
+            lastActivityAt: submittedAtIso
+        });
+        
         await context.sendActivity("🙌 Logged! Your AI win has been recorded.");
 
         await this.awardUsageLogging(userId, null, payload);
@@ -1469,6 +1483,8 @@ class TeamsBot extends TeamsActivityHandler {
       teamId: null,
       teamName: null,
       lastSeenAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      conversationReference: context.activity ? TeamsActivityHandler.getConversationReference(context.activity) : null,
     };
 
     try {
@@ -1493,6 +1509,8 @@ class TeamsBot extends TeamsActivityHandler {
         teamId: teams?.id || member?.tenantId || null,
         teamName: teams?.name || teams?.displayName || null,
         lastSeenAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        conversationReference: TeamsActivityHandler.getConversationReference(context.activity),
         manager: null,
         directReports: [],
       };

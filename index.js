@@ -43,5 +43,22 @@ app.prepare().then(() => {
     server.listen(port, () => {
         console.log(`\nServer listening on port ${port}`);
         console.log('\nBot is ready!');
+
+        // Run proactive notifications every 15 minutes
+        const { fork } = require('child_process');
+        const path = require('path');
+        
+        const runNotifier = () => {
+            console.log('[Scheduler] Triggering proactive notifications...');
+            const child = fork(path.join(__dirname, 'scripts', 'notify_proactive.js'));
+            child.on('exit', (code) => {
+                console.log(`[Scheduler] Notifier process exited with code ${code}`);
+            });
+        };
+
+        // Initial run after 1 minute
+        setTimeout(runNotifier, 60000);
+        // Periodic run
+        setInterval(runNotifier, 15 * 60000);
     });
 });
