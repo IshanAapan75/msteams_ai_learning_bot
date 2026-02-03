@@ -10,7 +10,7 @@ const adapter = new BotFrameworkAdapter({
     channelAuthTenant: process.env.MicrosoftAppTenantId
 });
 
-const HOURS_TO_MS = 60 * 60 * 1000;
+const MINS_TO_MS = 60 * 1000;
 
 async function runNotifications() {
     console.log(`[Proactive] Notification run started at ${new Date().toISOString()}`);
@@ -33,7 +33,7 @@ async function runNotifications() {
 }
 
 /**
- * 1. Unlock Notifications (17h Warning and Unlocked Alert)
+ * 1. Unlock Notifications (1m Warning and Unlocked Alert)
  */
 async function checkUnlockNotifications(user) {
     const progress = await fetchResponseProgress(user.id);
@@ -45,11 +45,10 @@ async function checkUnlockNotifications(user) {
     const now = Date.now();
     const timeUntilUnlock = availableTime - now;
 
-    // A. 17th Hour Warning (Available in 1 hour)
-    // We target the window where unlock is 1 hour away (approx 60-45 mins)
-    if (timeUntilUnlock > 0 && timeUntilUnlock <= (1.1 * HOURS_TO_MS) && timeUntilUnlock >= (0.9 * HOURS_TO_MS)) {
+    // A. 1 Minute Warning
+    if (timeUntilUnlock > 0 && timeUntilUnlock <= (1.1 * MINS_TO_MS)) {
         if (!activeLearning.notified17h) {
-            await sendProactiveMessage(user, `⏳ Your next learning module "**${activeLearning.module?.title || activeLearning.learningId}**" is about to unlock in about 1 hour! Get ready!`);
+            await sendProactiveMessage(user, `⏳ Your next learning module "**${activeLearning.module?.title || activeLearning.learningId}**" is about to unlock in about 1 minute! Get ready!`);
             activeLearning.notified17h = true;
             await saveResponseProgress(progress);
         }
@@ -66,7 +65,7 @@ async function checkUnlockNotifications(user) {
 }
 
 /**
- * 2. Streak Protection (20h Inactivity)
+ * 2. Streak Protection (Modified for fast test: 5 mins)
  */
 async function checkStreakNotification(user) {
     if (!user.lastActivityAt) return;
@@ -74,16 +73,13 @@ async function checkStreakNotification(user) {
     const lastActivity = new Date(user.lastActivityAt).getTime();
     const idleTime = Date.now() - lastActivity;
 
-    // Window: Idle for 20 hours (approx 20-20.5 hours)
-    if (idleTime >= (20 * HOURS_TO_MS) && idleTime < (20.5 * HOURS_TO_MS)) {
+    if (idleTime >= (5 * MINS_TO_MS) && idleTime < (10 * MINS_TO_MS)) {
         if (!user.notifiedStreak20h) {
-            await sendProactiveMessage(user, `🔥 Don't let your streak cool down! You haven't checked in for 20 hours. Jump back in to keep your momentum going!`);
-            // We use the user container for this flag
+            await sendProactiveMessage(user, `🔥 Don't let your streak cool down! You haven't checked in for 5 minutes. Jump back in to keep your momentum going!`);
             user.notifiedStreak20h = true;
             await containers.users.item(user.id, user.id).replace(user);
         }
-    } else if (idleTime < (1 * HOURS_TO_MS)) {
-        // Reset flag if they became active again
+    } else if (idleTime < (1 * MINS_TO_MS)) {
         if (user.notifiedStreak20h) {
             user.notifiedStreak20h = false;
             await containers.users.item(user.id, user.id).replace(user);
@@ -92,7 +88,7 @@ async function checkStreakNotification(user) {
 }
 
 /**
- * 3. Usage Reminder (4h after ANY activity if no usage log since)
+ * 3. Usage Reminder (3m after ANY activity)
  */
 async function checkUsageReminder(user) {
     if (!user.lastActivityAt) return;
@@ -104,19 +100,15 @@ async function checkUsageReminder(user) {
     const idleTimeSinceActivity = now - lastActivity;
     const timeSinceLastUsage = now - lastUsage;
 
-    // Trigger if:
-    // 1. Last activity was ~4 hours ago (4-4.5h window)
-    // 2. No usage has been logged since that activity (or in the last 4 hours)
-    if (idleTimeSinceActivity >= (4 * HOURS_TO_MS) && idleTimeSinceActivity < (4.5 * HOURS_TO_MS)) {
-        if (timeSinceLastUsage >= (4 * HOURS_TO_MS)) {
+    if (idleTimeSinceActivity >= (3 * MINS_TO_MS) && idleTimeSinceActivity < (6 * MINS_TO_MS)) {
+        if (timeSinceLastUsage >= (3 * MINS_TO_MS)) {
             if (!user.notifiedUsage4h) {
-                await sendProactiveMessage(user, `💡 It's been 4 hours since your last activity. Don't forget to log any "AI Wins" you've had! Recording your progress helps build the habit.`);
+                await sendProactiveMessage(user, `💡 It's been 3 minutes since your last activity. Don't forget to log any "AI Wins" you've had!`);
                 user.notifiedUsage4h = true;
                 await containers.users.item(user.id, user.id).replace(user);
             }
         }
-    } else if (idleTimeSinceActivity < (1 * HOURS_TO_MS)) {
-        // Reset flag if they became active again
+    } else if (idleTimeSinceActivity < (1 * MINS_TO_MS)) {
         if (user.notifiedUsage4h) {
             user.notifiedUsage4h = false;
             await containers.users.item(user.id, user.id).replace(user);

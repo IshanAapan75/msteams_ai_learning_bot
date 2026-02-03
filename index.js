@@ -44,7 +44,7 @@ app.prepare().then(() => {
         console.log(`\nServer listening on port ${port}`);
         console.log('\nBot is ready!');
 
-        // Run proactive notifications every 15 minutes
+        // Run proactive notifications every 30 seconds for fast testing
         const { fork } = require('child_process');
         const path = require('path');
         
@@ -56,9 +56,9 @@ app.prepare().then(() => {
             });
         };
 
-        // Initial run after 1 minute
-        setTimeout(runNotifier, 60000);
+        // Initial run after 10 seconds
+        setTimeout(runNotifier, 10000);
         // Periodic run
-        setInterval(runNotifier, 15 * 60000);
+        setInterval(runNotifier, 30 * 1000);
     });
 });
