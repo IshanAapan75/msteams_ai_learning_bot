@@ -5,6 +5,7 @@ import { upsertUserProfile } from "../../../../lib/users";
 import { initializeUserRewards } from "../../../../lib/rewards";
 import { calculateFluencyScore } from "../../../../lib/fluency";
 import { fetchResponseProgress, saveResponseProgress } from "../../../../lib/learningProgress";
+import { COOLDOWN_MS } from "../../../../lib/learningPlan.js";
 
 export async function POST(request) {
   try {
@@ -142,7 +143,7 @@ export async function POST(request) {
             
             if (nextModule) {
                 const now = new Date();
-                const availableAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours later
+                const availableAt = new Date(now.getTime() + COOLDOWN_MS).toISOString(); 
                 
                 const userResponse = await fetchResponseProgress(userId);
                 const nextEntry = {

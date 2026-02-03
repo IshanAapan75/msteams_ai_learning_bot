@@ -103,7 +103,7 @@ async function checkUsageReminder(user) {
     if (idleTimeSinceActivity >= (3 * MINS_TO_MS) && idleTimeSinceActivity < (6 * MINS_TO_MS)) {
         if (timeSinceLastUsage >= (3 * MINS_TO_MS)) {
             if (!user.notifiedUsage4h) {
-                await sendProactiveMessage(user, `💡 It's been 3 minutes since your last activity. Don't forget to log any "AI Wins" you've had!`);
+                await sendProactiveMessage(user, `💡 It's been 3 minutes since your last activity. Don't forget to log any "AI Usage" you've had!`);
                 user.notifiedUsage4h = true;
                 await containers.users.item(user.id, user.id).replace(user);
             }

@@ -237,7 +237,7 @@ function buildSurveyCard(learningId) {
     body: [
       {
         type: "TextBlock",
-        text: "👏 Awesome! Tell us about your AI win",
+        text: "👏 Awesome! Tell us about your AI Usage",
         weight: "bolder",
         size: "medium",
       },
@@ -583,7 +583,7 @@ function buildMainMenuCard(assessmentCompleted = false, learningStatus = "availa
 
     actions.push({
       type: "Action.Submit",
-      title: "📝 Log AI Win",
+      title: "📝 Log AI Usage",
       data: { action: "trigger_logusage" }
     });
     actions.push({
@@ -735,7 +735,7 @@ class TeamsBot extends TeamsActivityHandler {
           await this.conversationState.saveChanges(context);
           return;
       }
-      if (action === "trigger_logusage" || text === "log ai win") {
+      if (action === "trigger_logusage" || text === "log ai usage") {
           const surveyCard = buildSurveyCard();
           await context.sendActivity({ attachments: [surveyCard] });
           return;
@@ -975,27 +975,66 @@ class TeamsBot extends TeamsActivityHandler {
         .fetchAll();
 
       if (!userUsages || userUsages.length === 0) {
-        await this.replyWithMenu(context, userId, "You haven't logged any AI usage yet. Click 'Log AI Win' to get started!");
+        await this.replyWithMenu(context, userId, "You haven't logged any AI usage yet. Click 'Log AI Usage' to get started!");
         return;
       }
 
-      let responseMessage = "Here are your logged AI usages:\n\n";
-      userUsages.forEach((usage, index) => {
-        responseMessage += `**Usage Entry ${index + 1}:**\n`;
-        responseMessage += `  **Timestamp:** ${new Date(usage.timestamp).toLocaleString()}\n`;
-        if (usage.learningId) {
-          responseMessage += `  **Learning ID:** ${usage.learningId}\n`;
+      const body = [
+        {
+          type: "TextBlock",
+          text: "📊 Your AI Usage History",
+          weight: "bolder",
+          size: "large",
+          color: "accent"
         }
-        responseMessage += `  **What did you use AI for?** ${usage.responses.actionType || 'N/A'}\n`;
-        responseMessage += `  **How much time did you save?** ${usage.responses.timeSaved || 'N/A'}\n`;
-        responseMessage += `  **Confidence in output quality:** ${usage.responses.confidence || 'N/A'}\n`;
+      ];
+
+      // Limit to last 5 entries to keep card readable, or send multiple
+      userUsages.slice(0, 5).forEach((usage, index) => {
+        const dateStr = new Date(usage.timestamp).toLocaleDateString() + ' ' + new Date(usage.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        
+        body.push({
+          type: "Container",
+          spacing: "medium",
+          separator: index > 0,
+          items: [
+            {
+              type: "TextBlock",
+              text: `Entry: ${usage.responses.actionType || "AI Interaction"}`,
+              weight: "bolder",
+              wrap: true
+            },
+            {
+              type: "FactSet",
+              facts: [
+                { title: "Date", value: dateStr },
+                { title: "Time Saved", value: usage.responses.timeSaved || "N/A" },
+                { title: "Confidence", value: usage.responses.confidence || "N/A" }
+              ]
+            }
+          ]
+        });
+
         if (usage.responses.notes) {
-          responseMessage += `  **Notes:** ${usage.responses.notes}\n`;
+          body[body.length-1].items.push({
+            type: "TextBlock",
+            text: `_${usage.responses.notes}_`,
+            isSubtle: true,
+            wrap: true,
+            size: "small"
+          });
         }
-        responseMessage += "\n";
       });
 
-      await this.replyWithMenu(context, userId, responseMessage);
+      const historyCard = CardFactory.adaptiveCard({
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        version: "1.4",
+        type: "AdaptiveCard",
+        body
+      });
+
+      await context.sendActivity({ attachments: [historyCard] });
+      await this.replyWithMenu(context, userId, userUsages.length > 5 ? "Showing your 5 most recent entries." : "");
 
     } catch (error) {
       console.error("[Bot] Failed to fetch user usages", error);
@@ -1269,7 +1308,7 @@ class TeamsBot extends TeamsActivityHandler {
             lastActivityAt: submittedAtIso
         });
         
-        await this.replyWithMenu(context, userId, "🙌 Logged! Your AI win has been recorded.");
+        await this.replyWithMenu(context, userId, "🙌 Logged! Your AI Usage has been recorded.");
 
     } catch (error) {
         console.error("[Bot] Failed to submit survey", error);
@@ -1330,15 +1369,18 @@ class TeamsBot extends TeamsActivityHandler {
         console.error("[Bot] Quiz submission failed", body.error || res.statusText);
         await context.sendActivity(body.error || "Couldn't submit that quiz. Try again later.");
       } else {
-        // Build a detailed feedback message
-        let feedback = `📊 **Quiz Result: ${result.result.toUpperCase()}**\n`;
+        const result = await res.json();
+        
+        // Build a detailed feedback message for all questions
+        let feedback = `📊 **Quiz Summary**\n`;
         feedback += `Score: ${result.score.correct}/${result.score.total}\n\n`;
         
-        if (result.result !== "passed" && result.responses) {
-          feedback += "🔍 **Reviewing your answers:**\n";
+        if (result.responses) {
+          feedback += "🔍 **Question Review:**\n";
           result.responses.forEach((resp, idx) => {
-            const status = resp.correct ? "✅" : "❌";
-            feedback += `${idx + 1}. ${status} Your answer: *${resp.answer}*\n`;
+            const statusLabel = resp.correct ? "✅ CORRECT" : "❌ INCORRECT";
+            feedback += `${idx + 1}. ${statusLabel}\n`;
+            feedback += `   Your answer: *${resp.answer}*\n`;
             if (!resp.correct) {
               feedback += `   Correct answer: **${resp.correctAnswer}**\n`;
             }
@@ -1544,7 +1586,7 @@ class TeamsBot extends TeamsActivityHandler {
       if (learningStatus === "completed") {
         actions.push({ title: "🎯 Start Quiz", type: ActionTypes.MessageBack, text: "start quiz", displayText: "Start Quiz", value: { action: "trigger_quiz" } });
       }
-      actions.push({ title: "📝 Log AI Win", type: ActionTypes.MessageBack, text: "log ai win", displayText: "Log AI Win", value: { action: "trigger_logusage" } });
+      actions.push({ title: "📝 Log AI Usage", type: ActionTypes.MessageBack, text: "log ai usage", displayText: "Log AI Usage", value: { action: "trigger_logusage" } });
       actions.push({ title: "📊 My Usage", type: ActionTypes.MessageBack, text: "my usage", displayText: "My Usage", value: { action: "trigger_myusage" } });
       actions.push({ title: "🔄 Re-take Assessment", type: ActionTypes.MessageBack, text: "re-take assessment", displayText: "Re-take Assessment", value: { action: "trigger_assessment" } });
     }
