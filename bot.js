@@ -547,7 +547,6 @@ async function updateUserLanguage(userId, language) {
 async function getGlobalMenuActions(userId, assessmentCompleted, learningStatus) {
   const actions = [];
   
-  // Check for Retake Quiz or Micro Action eligibility
   let showRetake = false;
   let showMicroAction = false;
   try {
@@ -555,9 +554,15 @@ async function getGlobalMenuActions(userId, assessmentCompleted, learningStatus)
       const currentLearning = userResponse.learnings?.find(l => l.status === 'completed');
       
       if (currentLearning) {
-          if (!currentLearning.quizPassedAt && currentLearning.attempts?.length === 1) {
+          const attemptCount = currentLearning.attempts?.length || 0;
+          const hasPassed = Boolean(currentLearning.quizPassedAt);
+
+          // Logic: 
+          // 1. If failed once -> Show Retake
+          // 2. If passed OR failed twice -> Show Micro Action (if not done)
+          if (!hasPassed && attemptCount === 1) {
               showRetake = true;
-          } else if ((currentLearning.quizPassedAt || currentLearning.attempts?.length >= 2) && !currentLearning.microActionCompleted) {
+          } else if ((hasPassed || attemptCount >= 2) && !currentLearning.microActionCompleted) {
               showMicroAction = true;
           }
       }
@@ -566,17 +571,15 @@ async function getGlobalMenuActions(userId, assessmentCompleted, learningStatus)
   if (!assessmentCompleted) {
     actions.push({ title: "🧠 Start Assessment", action: "trigger_assessment", text: "start assessment" });
   } else {
-    // Show Micro Action instead of View Learning if pending
+    // Show Micro Action if it's the current next step
     if (showMicroAction) {
         actions.push({ title: "⚡ Micro Action", action: "trigger_micro_action", text: "micro action" });
+    } else if (showRetake) {
+        actions.push({ title: "🔄 Retake Quiz", action: "trigger_quiz", text: "start quiz" });
     } else if (learningStatus === "available") {
         actions.push({ title: "📘 View Learning", action: "trigger_learning", text: "view learning" });
-    }
-    
-    if (showRetake) {
-        actions.push({ title: "🔄 Retake Quiz", action: "trigger_quiz", text: "start quiz" });
-    } else if (learningStatus === "completed" && !showMicroAction) {
-      actions.push({ title: "🎯 Start Quiz", action: "trigger_quiz", text: "start quiz" });
+    } else if (learningStatus === "completed") {
+        actions.push({ title: "🎯 Start Quiz", action: "trigger_quiz", text: "start quiz" });
     }
 
     actions.push({ title: "📝 Log AI Usage", action: "trigger_logusage", text: "log ai usage" });
@@ -1567,10 +1570,6 @@ class TeamsBot extends TeamsActivityHandler {
         // Tier Check
         if (finishedModule && nextModule && nextModule.tier && finishedModule.tier !== nextModule.tier) {
             completionMessage += `\n\n🎖️ **Congratulations!** You've been promoted to **${nextModule.tier}**!`;
-        }
-
-        if (assignment?.assignment) {
-            completionMessage += `\n\n🎉 Good news! Your next learning module "**${nextTitle}**" is now UNLOCKED and ready for you.`;
         }
     }
 
