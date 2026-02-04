@@ -34,7 +34,7 @@ const LEVEL_MAPPING = {
     'AI Champion': 6
 };
 
-export async function POST(request) {
+async function POST(request) {
   try {
     const { userId, answers } = await request.json();
 
@@ -61,14 +61,11 @@ export async function POST(request) {
                 totalPointsEarned += section.weight / section.questions.length;
             }
         } else if (question.type === 'self_assessment') {
-            // Explicit scoring for Confidence (Q9)
-            // 1 → 2 pts, 2 → 4 pts, 3 → 6 pts, 4 → 8 pts, 5 → 10 pts
             const val = parseInt(userAnswer.answer, 10);
             if (!isNaN(val) && val >= 1 && val <= 5) {
                 totalPointsEarned += val * 2;
             }
         } else if (question.type === 'usage_frequency') {
-            // Explicit scoring for Usage Frequency (Q10)
             const map = {
                 'Never': 0,
                 'Monthly': 2,
@@ -96,11 +93,9 @@ export async function POST(request) {
 
     await containers.assessmentresponse.items.create(responseDoc);
     
-    // Calculate initial XP and Level based on fluency
     const targetLevel = LEVEL_MAPPING[fluencyLevel] || 1;
     const startingXp = getXpForLevel(targetLevel);
 
-    // Update user profile with fluency score, level, and XP
     await upsertUserProfile({
         id: userId,
         fluencyScore,
@@ -109,7 +104,6 @@ export async function POST(request) {
         level: targetLevel
     });
 
-    // Update rewards container to keep everything in sync
     await initializeUserRewards({
         userId,
         xp: startingXp,
@@ -117,7 +111,6 @@ export async function POST(request) {
         fluencyScore
     });
     
-    // Auto-assign first learning module if it doesn't exist or Day 1 isn't complete
     const userResponse = await fetchResponseProgress(userId);
     const learnings = userResponse.learnings || [];
 
@@ -125,7 +118,6 @@ export async function POST(request) {
     const isDay1FullyDone = day1Entry && day1Entry.status === 'completed' && day1Entry.quizPassedAt;
 
     if (!isDay1FullyDone) {
-        // If they have other modules but Day 1 isn't done, clear them out
         const hasOtherModules = learnings.some(l => l.learningId !== 'micro-learning-day-1');
         
         if (hasOtherModules || !day1Entry) {
@@ -138,7 +130,7 @@ export async function POST(request) {
                     status: "available",
                     createdAt: nowIso,
                     updatedAt: nowIso,
-                    availableAt: nowIso, // IMMEDIATE
+                    availableAt: nowIso,
                     module: firstModule,
                     attempts: [],
                     quizAvailableAt: null,
@@ -167,3 +159,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "Failed to submit assessment" }, { status: 500 });
   }
 }
+
+module.exports = {
+    POST
+};

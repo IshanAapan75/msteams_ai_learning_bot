@@ -1,21 +1,26 @@
-import { containers } from "../../../../lib/cosmos";
-import { NextResponse } from "next/server";
+const { containers } = require("../../../../lib/cosmos.js");
+const { NextResponse } = require("next/server");
 
-export async function GET() {
+async function GET(req) {
   try {
-    const { resources: allAssessmentItems } = await containers.assessmentquestion.items.query("SELECT * FROM c").fetchAll();
+    const { resources: allItems } = await containers.assessmentquestion.items.query("SELECT * FROM c").fetchAll();
     
-    if (!allAssessmentItems || allAssessmentItems.length === 0) {
-      return NextResponse.json({ error: "Assessment questions not found" }, { status: 404 });
-    }
+    const questions = allItems
+      .filter(i => i.id !== 'scoring_config')
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' }));
+      
+    const scoringConfig = allItems.find(i => i.id === 'scoring_config');
 
-    const questions = allAssessmentItems
-      .filter(item => item.id !== 'scoring_config')
-      .sort((a, b) => a.id.localeCompare(b.id));
-
-    return NextResponse.json(questions);
+    return NextResponse.json({
+      questions,
+      scoringConfig
+    });
   } catch (error) {
-    console.error("Failed to fetch assessment questions", error);
-    return NextResponse.json({ error: "Failed to fetch assessment questions" }, { status: 500 });
+    console.error("[API/assessment/questions] Error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+
+module.exports = {
+    GET
+};

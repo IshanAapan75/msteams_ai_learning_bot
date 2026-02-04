@@ -1,14 +1,14 @@
-import { containers } from "../../../../lib/cosmos";
-import { NextResponse } from "next/server";
-import { awardXpAction } from "../../../../lib/rewards";
-import { upsertUserProfile } from "../../../../lib/users";
-import { assignBadges } from "../../../../lib/badges";
-import { initializeUserRewards } from "../../../../lib/rewards";
-import { calculateFluencyScore } from "../../../../lib/fluency";
-import { fetchResponseProgress, saveResponseProgress } from "../../../../lib/learningProgress";
-import { COOLDOWN_MS } from "../../../../lib/learningPlan.js";
+const { containers } = require("../../../../lib/cosmos");
+const { NextResponse } = require("next/server");
+const { awardXpAction } = require("../../../../lib/rewards");
+const { upsertUserProfile } = require("../../../../lib/users");
+const { initializeUserRewards } = require("../../../../lib/rewards");
+const { calculateFluencyScore } = require("../../../../lib/fluency");
+const { fetchResponseProgress, saveResponseProgress } = require("../../../../lib/learningProgress");
+const { COOLDOWN_MS } = require("../../../../lib/learningPlan.js");
+const { assignBadges } = require("../../../../lib/badges");
 
-export async function POST(request) {
+async function POST(request) {
   try {
     const { userId, learningId, responses } = await request.json();
 
@@ -45,7 +45,6 @@ export async function POST(request) {
     });
 
     // 2. Recalculate Dynamic Fluency Score
-    // Fetch all user logs to calculate stats
     const { resources: allUserLogs } = await containers.userusage.items
         .query({
             query: "SELECT * FROM c WHERE c.userId = @userId",
@@ -53,10 +52,6 @@ export async function POST(request) {
         })
         .fetchAll();
     
-    // Fetch Assessment Correctness
-    // We need the latest assessment response to calculate correctness rate (correct / total)
-    // Or we can just use the initial fluency score logic, but the requirement specifically asks for "correctness * 15"
-    // Let's look up the assessment response.
     const { resources: assessmentResponses } = await containers.assessmentresponse.items
         .query({
             query: "SELECT * FROM c WHERE c.userId = @userId ORDER BY c.timestamp DESC OFFSET 0 LIMIT 1",
@@ -66,14 +61,6 @@ export async function POST(request) {
 
     let assessmentCorrectness = 0;
     if (assessmentResponses.length > 0) {
-        const answers = assessmentResponses[0].answers || [];
-        // Assuming we can infer correctness or if it was stored. 
-        // The current storage doesn't explicitly store "isCorrect" in the answers array in the new logic,
-        // but for MVP let's approximate: 
-        // If we don't have explicit correctness, we can use (fluencyScore / 100) as a proxy for "skill",
-        // OR we just rely on the fact that we should have stored it.
-        // Let's use the 'fluencyScore' from the assessment as a base correctness proxy if raw data isn't easy.
-        // Assessment Score 0-100. Correctness 0.0-1.0.
         assessmentCorrectness = (assessmentResponses[0].fluencyScore || 0) / 100;
     }
 
@@ -87,7 +74,6 @@ export async function POST(request) {
     });
 
     // 3. Update User Profile & Rewards
-    // We need to fetch the current profile to preserve other fields like language
     const { resource: currentProfile } = await containers.users.item(userId, userId).read();
     
     const badges = await assignBadges({ ...currentProfile, streak: newStreak });
@@ -99,19 +85,6 @@ export async function POST(request) {
         streak: newStreak
     });
 
-    // We also need to sync the Rewards container with the new Fluency Score
-    // We can reuse initializeUserRewards which upserts
-    await initializeUserRewards({
-        userId,
-        fluencyScore: newFluencyScore,
-        // Pass existing values if we don't want to overwrite them with 0
-        xp: undefined, // undefined will likely be ignored or we need to handle it in lib/rewards
-        tier: undefined 
-    });
-    // Note: initializeUserRewards implementation in previous turn might overwrite XP if passed undefined. 
-    // Let's check lib/rewards.js content implicitly. 
-    // Ideally we should just patch the fluency field.
-    // For MVP safety, let's just patch the reward record directly here to be safe.
     const { resource: rewardRecord } = await containers.rewards.item(userId, userId).read();
     if (rewardRecord) {
         rewardRecord.fluency = newFluencyScore;
@@ -121,15 +94,13 @@ export async function POST(request) {
     // 4. Assign Next Learning Module (if applicable)
     let nextModuleInfo = null;
     
-    // Get current module info to find the next one
     if (learningId) {
         const { resource: currentModule } = await containers.ai_learning.item(learningId, learningId).read();
         
         if (currentModule && typeof currentModule.order === 'number') {
             const currentOrder = currentModule.order;
-            const currentTier = currentModule.tier || "AI Rookie"; // Default tier
+            const currentTier = currentModule.tier || "AI Rookie";
             
-            // Find next module in same tier
             const { resources: nextModules } = await containers.ai_learning.items.query({
                 query: "SELECT * FROM c WHERE c.tier = @tier AND c[\"order\"] > @currentOrder ORDER BY c[\"order\"] ASC OFFSET 0 LIMIT 1",
                 parameters: [
@@ -139,9 +110,6 @@ export async function POST(request) {
             }).fetchAll();
             
             let nextModule = nextModules[0];
-            
-            // If no more modules in this tier, maybe move to next tier? 
-            // For MVP simplicity, we just stop or maybe loop. Let's assume just stopping for now if no content.
             
             if (nextModule) {
                 const now = new Date();
@@ -171,7 +139,7 @@ export async function POST(request) {
         }
     }
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: true, 
       usageId: createdUsage.id,
       xpEarned,
@@ -185,3 +153,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "Failed to log usage" }, { status: 500 });
   }
 }
+
+module.exports = {
+    POST
+};

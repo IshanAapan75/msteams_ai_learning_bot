@@ -1,16 +1,13 @@
-import { NextResponse } from "next/server";
-import { containers } from "../../../../lib/cosmos.js";
-import {
+const { NextResponse } = require("next/server");
+const { containers } = require("../../../../lib/cosmos.js");
+const {
   fetchResponseProgress,
   getLearningEntry,
   getPendingAttempts,
   upsertLearningEntry,
-} from "../../../../lib/learningProgress";
-import { syncLearningAssignment } from "../../../../lib/learningPlan.js";
-import { ensureUserHasProfile } from "../../../../lib/users.js";
-
-export const runtime = 'nodejs';
-export const dynamic = "force-dynamic";
+} = require("../../../../lib/learningProgress");
+const { syncLearningAssignment } = require("../../../../lib/learningPlan.js");
+const { ensureUserHasProfile } = require("../../../../lib/users.js");
 
 async function populateQuestions(quiz) {
   if (!quiz || !Array.isArray(quiz.questions) || quiz.questions.length === 0) {
@@ -38,7 +35,7 @@ async function populateQuestions(quiz) {
   return { ...quiz, questions: populatedQuestions };
 }
 
-export async function POST(req) {
+async function POST(req) {
   try {
     const body = await req.json();
     const userId = body.userId;
@@ -202,3 +199,6 @@ export async function POST(req) {
   }
 }
 
+module.exports = {
+    POST
+};

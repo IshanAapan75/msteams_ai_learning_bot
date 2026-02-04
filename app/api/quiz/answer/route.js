@@ -1,14 +1,12 @@
-import { containers } from "../../../../lib/cosmos.js";
-import { addXp } from "../../../../lib/xp";
-import { assignBadges } from "../../../../lib/badges";
-import { awardXpAction, syncRewardBadges } from "../../../../lib/rewards";
-import { markQuizAttempt } from "../../../../lib/learningProgress";
-import { recordQuizResult } from "../../../../lib/learningPlan.js";
-import { NextResponse } from "next/server";
+const { containers } = require("../../../../lib/cosmos.js");
+const { addXp } = require("../../../../lib/xp");
+const { assignBadges } = require("../../../../lib/badges");
+const { awardXpAction, syncRewardBadges } = require("../../../../lib/rewards");
+const { markQuizAttempt } = require("../../../../lib/learningProgress");
+const { recordQuizResult } = require("../../../../lib/learningPlan.js");
+const { NextResponse } = require("next/server");
 
-export const dynamic = "force-dynamic";
-
-export async function POST(req) {
+async function POST(req) {
   try {
     const body = await req.json();
     const userId = body.userId;
@@ -181,3 +179,6 @@ export async function POST(req) {
   }
 }
 
+module.exports = {
+    POST
+};

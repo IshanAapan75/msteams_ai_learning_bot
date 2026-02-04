@@ -1,11 +1,9 @@
-import { containers } from "../../../lib/cosmos.js";
-import { NextResponse } from "next/server";
-import { awardXpAction } from "../../../lib/rewards";
-import { ensureUserHasProfile } from "../../../lib/users.js";
-import { upsertLearningEntry } from "../../../lib/learningProgress";
-import { recordSurveyAndAssignNext, syncLearningAssignment } from "../../../lib/learningPlan.js";
-
-export const dynamic = "force-dynamic";
+const { containers } = require("../../../lib/cosmos.js");
+const { NextResponse } = require("next/server");
+const { awardXpAction } = require("../../../lib/rewards");
+const { ensureUserHasProfile } = require("../../../lib/users.js");
+const { upsertLearningEntry } = require("../../../lib/learningProgress");
+const { recordSurveyAndAssignNext, syncLearningAssignment } = require("../../../lib/learningPlan.js");
 
 async function upsertResponseStatus({ userId, microLearningId, status, quizzes = [] }) {
   if (!userId || !microLearningId) {
@@ -20,7 +18,7 @@ async function upsertResponseStatus({ userId, microLearningId, status, quizzes =
   });
 }
 
-export async function POST(req) {
+async function POST(req) {
   const learningModule = await req.json();
 
   if (!learningModule.status) {
@@ -55,7 +53,7 @@ export async function POST(req) {
   return NextResponse.json(createdModule);
 }
 
-export async function PATCH(req) {
+async function PATCH(req) {
   const payload = await req.json();
   const { learningId, userId, status, survey, ...rest } = payload;
 
@@ -123,7 +121,7 @@ export async function PATCH(req) {
   }
 }
 
-export async function GET(req) {
+async function GET(req) {
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("userId");
   const forceAssignment = searchParams.get("sync") === "1";
@@ -143,3 +141,8 @@ export async function GET(req) {
   }
 }
 
+module.exports = {
+    POST,
+    PATCH,
+    GET
+};
