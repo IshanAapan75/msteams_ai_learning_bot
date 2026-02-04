@@ -187,14 +187,6 @@ function buildLearningSummaryCard(assignment) {
 
   const body = [
     ...lines,
-    {
-      type: "TextBlock",
-      text: assignment.canStart
-        ? "Ready to open now. Type **/learning** to read the module."
-        : "Module is locked for a short cooldown to build healthy habits. I’ll remind you when it’s ready!",
-      wrap: true,
-      spacing: "medium",
-    },
   ];
 
   const actions = [];
@@ -1036,19 +1028,38 @@ class TeamsBot extends TeamsActivityHandler {
   }
 
   async assignFirstLearningModule(context, userId) {
-    if (!userId) {
-      return false;
-    }
+    if (!userId) return false;
 
     try {
-      const userResponse = await fetchResponseProgress(userId);
+      let userResponse = await fetchResponseProgress(userId);
+      const learnings = userResponse.learnings || [];
 
-      // Force overwrite if user only has old/incorrect data
+      // 1. Find Day 1 and check if it's fully complete (Status + Quiz)
+      const day1Entry = learnings.find(l => l.learningId === 'micro-learning-day-1');
+      const isDay1FullyDone = day1Entry && day1Entry.status === 'completed' && day1Entry.quizPassedAt;
+
+      if (isDay1FullyDone) {
+          // Prerequisite met. User can move forward with whatever else they have.
+          return false;
+      }
+
+      // 2. If Day 1 is NOT fully done, but they have other modules (like Day 16), we reset.
+      const hasOtherModules = learnings.some(l => l.learningId !== 'micro-learning-day-1');
+
+      if (hasOtherModules) {
+          console.log(`[Bot] Prerequisite fail: Day 1 not done but other modules found. Resetting to Day 1.`);
+          // Keep Day 1 if it exists (so they don't lose reading progress), but remove everything else.
+          userResponse.learnings = day1Entry ? [day1Entry] : [];
+          await saveResponseProgress(userResponse);
+          
+          if (day1Entry) return false; // Day 1 is now the only one, no need to "assign" it again.
+      }
+
       if (userResponse.learnings && userResponse.learnings.length > 0) {
         return false;
       }
 
-      // 1. Strictly pick the module with ID 'micro-learning-day-1'
+      // 3. Strictly assign Day 1
       const { resource: firstModule } = await containers.ai_learning.item('micro-learning-day-1', 'micro-learning-day-1').read();
 
       if (!firstModule) {
@@ -1064,7 +1075,7 @@ class TeamsBot extends TeamsActivityHandler {
           status: "available",
           createdAt: nowIso,
           updatedAt: nowIso,
-          availableAt: nowIso,
+          availableAt: nowIso, // Immediate (0 delay)
           module: firstModule,
           attempts: [],
           quizAvailableAt: null,
@@ -1423,7 +1434,15 @@ class TeamsBot extends TeamsActivityHandler {
     state.questionIndex = 0;
     state.currentResponses = [];
     const feedback = context.turnState.get("quiz_feedback") || "";
-    await this.replyWithMenu(context, userId, `${feedback}\n\n🎉 All quizzes completed! Your next module is assigned.`);
+    const assignment = await fetchAssignment(userId);
+    const nextTitle = assignment?.assignment?.module?.title || "Next Module";
+    
+    let completionMessage = `${feedback}\n\n🎉 All quizzes completed!`;
+    if (assignment?.assignment) {
+        completionMessage += `\n\n🎉 Good news! Your next learning module "**${nextTitle}**" is now UNLOCKED and ready for you.`;
+    }
+
+    await this.replyWithMenu(context, userId, completionMessage);
   }
 
   async ensureUserExists(context, userId, userName) {

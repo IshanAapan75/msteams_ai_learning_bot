@@ -21,9 +21,8 @@ async function runNotifications() {
         if (!user.conversationReference) continue;
 
         try {
-            // await checkUnlockNotifications(user); // Disabled for 0-cooldown mode
             await checkStreakNotification(user);
-            await checkUsageReminder(user);
+            // await checkUsageReminder(user); // Disabled
         } catch (err) {
             console.error(`[Proactive] Error processing user ${user.id}:`, err);
         }
@@ -33,39 +32,7 @@ async function runNotifications() {
 }
 
 /**
- * 1. Unlock Notifications (2m Warning and Unlocked Alert)
- */
-async function checkUnlockNotifications(user) {
-    const progress = await fetchResponseProgress(user.id);
-    const activeLearning = progress.learnings?.find(l => l.status === "available" && l.availableAt);
-
-    if (!activeLearning) return;
-
-    const availableTime = new Date(activeLearning.availableAt).getTime();
-    const now = Date.now();
-    const timeUntilUnlock = availableTime - now;
-
-    // A. 1 Minute Before Unlock Warning (Trigger when 1 minute is left, approx at the 2-minute mark)
-    if (timeUntilUnlock > 0 && timeUntilUnlock <= (1.1 * MINS_TO_MS)) {
-        if (!activeLearning.notified17h) {
-            await sendProactiveMessage(user, `⏳ Your next learning module "**${activeLearning.module?.title || activeLearning.learningId}**" is about to unlock in about 1 minute! Get ready!`);
-            activeLearning.notified17h = true;
-            await saveResponseProgress(progress);
-        }
-    }
-
-    // B. Unlocked Alert (at 3 minutes)
-    if (timeUntilUnlock <= 0) {
-        if (!activeLearning.notifiedUnlocked) {
-            await sendProactiveMessage(user, `🎉 Good news! Your next learning module "**${activeLearning.module?.title || activeLearning.learningId}**" is now UNLOCKED and ready for you.`);
-            activeLearning.notifiedUnlocked = true;
-            await saveResponseProgress(progress);
-        }
-    }
-}
-
-/**
- * 2. Streak Protection (Testing: 10 mins)
+ * 1. Streak Protection (Testing: 10 mins)
  */
 async function checkStreakNotification(user) {
     if (!user.lastActivityAt) return;

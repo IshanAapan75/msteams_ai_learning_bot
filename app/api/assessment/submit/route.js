@@ -1,11 +1,10 @@
-import { containers } from "../../../../lib/cosmos";
-import { NextResponse } from "next/server";
-import { computeStartTimestamp } from "../../../../lib/utils";
-import { upsertUserProfile } from "../../../../lib/users";
-import { getXpForLevel } from "../../../../lib/xp";
-import { initializeUserRewards } from "../../../../lib/rewards";
-import { fetchResponseProgress, saveResponseProgress } from "../../../../lib/learningProgress";
-import { fetchLearningCatalog } from "../../../../lib/learningPlan.js";
+const { containers } = require("../../../../lib/cosmos");
+const { NextResponse } = require("next/server");
+const { upsertUserProfile } = require("../../../../lib/users");
+const { getXpForLevel } = require("../../../../lib/xp");
+const { initializeUserRewards } = require("../../../../lib/rewards");
+const { fetchResponseProgress, saveResponseProgress } = require("../../../../lib/learningProgress");
+const { fetchLearningCatalog } = require("../../../../lib/learningPlan.js");
 
 const DEFAULT_SCORING_CONFIG = {
     sectionWeights: {
@@ -118,24 +117,35 @@ export async function POST(request) {
         fluencyScore
     });
     
-    if (!userResponse.learnings || userResponse.learnings.length === 0) {
-        // Strictly pick the module with ID 'micro-learning-day-1'
-        const { resource: firstModule } = await containers.ai_learning.item('micro-learning-day-1', 'micro-learning-day-1').read();
+    // Auto-assign first learning module if it doesn't exist or Day 1 isn't complete
+    const userResponse = await fetchResponseProgress(userId);
+    const learnings = userResponse.learnings || [];
 
-        if (firstModule) {
-            const nowIso = new Date().toISOString();
-            userResponse.learnings = [{
-                learningId: firstModule.id,
-                status: "available",
-                createdAt: nowIso,
-                updatedAt: nowIso,
-                availableAt: nowIso,
-                module: firstModule,
-                attempts: [],
-                quizAvailableAt: null,
-                usageAvailableAt: null
-            }];
-            await saveResponseProgress(userResponse);
+    const day1Entry = learnings.find(l => l.learningId === 'micro-learning-day-1');
+    const isDay1FullyDone = day1Entry && day1Entry.status === 'completed' && day1Entry.quizPassedAt;
+
+    if (!isDay1FullyDone) {
+        // If they have other modules but Day 1 isn't done, clear them out
+        const hasOtherModules = learnings.some(l => l.learningId !== 'micro-learning-day-1');
+        
+        if (hasOtherModules || !day1Entry) {
+            const { resource: firstModule } = await containers.ai_learning.item('micro-learning-day-1', 'micro-learning-day-1').read();
+
+            if (firstModule) {
+                const nowIso = new Date().toISOString();
+                userResponse.learnings = [{
+                    learningId: firstModule.id,
+                    status: "available",
+                    createdAt: nowIso,
+                    updatedAt: nowIso,
+                    availableAt: nowIso, // IMMEDIATE
+                    module: firstModule,
+                    attempts: [],
+                    quizAvailableAt: null,
+                    usageAvailableAt: null
+                }];
+                await saveResponseProgress(userResponse);
+            }
         }
     }
 
