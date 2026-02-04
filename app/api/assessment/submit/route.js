@@ -5,6 +5,7 @@ import { upsertUserProfile } from "../../../../lib/users";
 import { getXpForLevel } from "../../../../lib/xp";
 import { initializeUserRewards } from "../../../../lib/rewards";
 import { fetchResponseProgress, saveResponseProgress } from "../../../../lib/learningProgress";
+import { fetchLearningCatalog } from "../../../../lib/learningPlan.js";
 
 const DEFAULT_SCORING_CONFIG = {
     sectionWeights: {
@@ -121,13 +122,11 @@ export async function POST(request) {
     const userResponse = await fetchResponseProgress(userId);
 
     if (!userResponse.learnings || userResponse.learnings.length === 0) {
-        // Strictly pick the module with Order 1
-        let { resources: learningModules } = await containers.ai_learning.items.query({
-            query: "SELECT * FROM c WHERE c[\"order\"] = 1"
-        }).fetchAll();
+        // Strictly pick the module at the top of the sorted catalog
+        const catalog = await fetchLearningCatalog(userId);
+        const firstModule = catalog[0];
 
-        if (learningModules.length > 0) {
-            const firstModule = learningModules[0];
+        if (firstModule) {
             const nowIso = new Date().toISOString();
             userResponse.learnings = [{
                 learningId: firstModule.id,

@@ -2,7 +2,7 @@ const { TeamsActivityHandler, CardFactory, MessageFactory, ActionTypes, TurnCont
 const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
-const { syncLearningAssignment, recordSurveyAndAssignNext, COOLDOWN_MS } = require("./lib/learningPlan.js");
+const { syncLearningAssignment, recordSurveyAndAssignNext, COOLDOWN_MS, fetchLearningCatalog } = require("./lib/learningPlan.js");
 const { fetchResponseProgress, saveResponseProgress } = require("./lib/learningProgress.js");
 const { awardXpAction } = require("./lib/rewards.js");
 const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -1043,16 +1043,14 @@ class TeamsBot extends TeamsActivityHandler {
     try {
       const userResponse = await fetchResponseProgress(userId);
 
+      // Force overwrite if user only has old/incorrect data
       if (userResponse.learnings && userResponse.learnings.length > 0) {
         return false;
       }
 
-      // 1. Always find the first module in the catalog (Order 1)
-      const { resources: modules } = await containers.ai_learning.items.query({
-          query: "SELECT * FROM c WHERE c[\"order\"] = 1"
-      }).fetchAll();
-      
-      const firstModule = modules[0];
+      // 1. Get the sorted catalog and pick the very first item
+      const catalog = await fetchLearningCatalog(userId);
+      const firstModule = catalog[0];
 
       if (!firstModule) {
         console.warn("[Bot] No modules found in catalog to assign.");
@@ -1077,7 +1075,6 @@ class TeamsBot extends TeamsActivityHandler {
       userResponse.updatedAt = nowIso;
 
       await saveResponseProgress(userResponse);
-      await this.replyWithMenu(context, userId, `📘 I've assigned your first module: **${firstModule.title || firstModule.topic}**.`);
       return true;
     } catch (error) {
       console.error("[Bot] Failed to assign first learning module", error);
@@ -1194,7 +1191,7 @@ class TeamsBot extends TeamsActivityHandler {
 
       const assigned = await this.assignFirstLearningModule(context, userId);
       if (assigned) {
-        await this.replyWithMenu(context, userId, "📘 Let's get started! Click 'View Learning' to open your first module.");
+        await this.replyWithMenu(context, userId, "🎉 **Assessment Complete!**\n\n📘 Let's get started! Click 'View Learning' to open your first module.");
       } else {
         const assignment = await fetchAssignment(userId);
         if (assignment?.assignment) {
