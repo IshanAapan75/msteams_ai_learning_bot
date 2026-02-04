@@ -558,31 +558,38 @@ async function getGlobalMenuActions(userId, assessmentCompleted, learningStatus)
   } catch (err) {}
 
   if (!assessmentCompleted) {
-    actions.push({ title: "🧠 Start Assessment", type: ActionTypes.MessageBack, text: "start assessment", displayText: "Start Assessment", value: { action: "trigger_assessment" } });
+    actions.push({ title: "🧠 Start Assessment", action: "trigger_assessment", text: "start assessment" });
   } else {
-    actions.push({ title: "📘 View Learning", type: ActionTypes.MessageBack, text: "view learning", displayText: "View Learning", value: { action: "trigger_learning" } });
+    actions.push({ title: "📘 View Learning", action: "trigger_learning", text: "view learning" });
     
     if (showRetake) {
-        actions.push({ title: "🔄 Retake Quiz", type: ActionTypes.MessageBack, text: "start quiz", displayText: "Retake Quiz", value: { action: "trigger_quiz" } });
+        actions.push({ title: "🔄 Retake Quiz", action: "trigger_quiz", text: "start quiz" });
     } else if (learningStatus === "completed") {
-      actions.push({ title: "🎯 Start Quiz", type: ActionTypes.MessageBack, text: "start quiz", displayText: "Start Quiz", value: { action: "trigger_quiz" } });
+      actions.push({ title: "🎯 Start Quiz", action: "trigger_quiz", text: "start quiz" });
     }
 
-    actions.push({ title: "📝 Log AI Usage", type: ActionTypes.MessageBack, text: "log ai usage", displayText: "Log AI Usage", value: { action: "trigger_logusage" } });
-    actions.push({ title: "📊 My Usage", type: ActionTypes.MessageBack, text: "my usage", displayText: "My Usage", value: { action: "trigger_myusage" } });
-    actions.push({ title: "🔄 Re-take Assessment", type: ActionTypes.MessageBack, text: "re-take assessment", displayText: "Re-take Assessment", value: { action: "trigger_assessment" } });
+    actions.push({ title: "📝 Log AI Usage", action: "trigger_logusage", text: "log ai usage" });
+    actions.push({ title: "📊 My Usage", action: "trigger_myusage", text: "my usage" });
+    actions.push({ title: "🔄 Re-take Assessment", action: "trigger_assessment", text: "re-take assessment" });
   }
   return actions;
 }
 
 async function buildMainMenuCard(userId, assessmentCompleted = false, learningStatus = "available") {
-  const actions = await getGlobalMenuActions(userId, assessmentCompleted, learningStatus);
+  const rawActions = await getGlobalMenuActions(userId, assessmentCompleted, learningStatus);
+  
+  // Map to Adaptive Card Action.Submit
+  const actions = rawActions.map(a => ({
+      type: "Action.Submit",
+      title: a.title,
+      data: { action: a.action, msteams: { type: "messageBack", text: a.text } }
+  }));
 
   return CardFactory.adaptiveCard({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     version: "1.4",
     type: "AdaptiveCard",
-    body: [], // Removed header text for a cleaner look
+    body: [],
     actions
   });
 }
@@ -818,7 +825,14 @@ class TeamsBot extends TeamsActivityHandler {
   }
 
   async sendMainMenuSuggestedActions(context, userId, assessmentCompleted = false, learningStatus = "available", text = "How can I help you today?") {
-    const actions = await getGlobalMenuActions(userId, assessmentCompleted, learningStatus);
+    const rawActions = await getGlobalMenuActions(userId, assessmentCompleted, learningStatus);
+    const actions = rawActions.map(a => ({
+        type: ActionTypes.MessageBack,
+        title: a.title,
+        text: a.text,
+        displayText: a.title,
+        value: { action: a.action }
+    }));
     const message = MessageFactory.suggestedActions(actions, text);
     await context.sendActivity(message);
   }
