@@ -551,15 +551,15 @@ async function getGlobalMenuActions(userId, assessmentCompleted, learningStatus)
   let showMicroAction = false;
   try {
       const userResponse = await fetchResponseProgress(userId);
-      const currentLearning = userResponse.learnings?.find(l => l.status === 'completed');
+      // Check ALL learnings for pending micro-actions or retakes, prioritizing the most recent
+      const reversedLearnings = (userResponse.learnings || []).slice().reverse();
+      
+      const currentLearning = reversedLearnings.find(l => l.status === 'completed' || l.quizPassedAt);
       
       if (currentLearning) {
           const attemptCount = currentLearning.attempts?.length || 0;
           const hasPassed = Boolean(currentLearning.quizPassedAt);
 
-          // Logic: 
-          // 1. If failed once -> Show Retake
-          // 2. If passed OR failed twice -> Show Micro Action (if not done)
           if (!hasPassed && attemptCount === 1) {
               showRetake = true;
           } else if ((hasPassed || attemptCount >= 2) && !currentLearning.microActionCompleted) {
@@ -1059,7 +1059,9 @@ class TeamsBot extends TeamsActivityHandler {
   async handleMicroActionTrigger(context, userId) {
       try {
           const userResponse = await fetchResponseProgress(userId);
-          const currentLearning = userResponse.learnings?.find(l => l.status === 'completed' && !l.microActionCompleted);
+          // Search from newest to oldest to find the active pending micro-action
+          const reversedLearnings = (userResponse.learnings || []).slice().reverse();
+          const currentLearning = reversedLearnings.find(l => (l.status === 'completed' || l.quizPassedAt) && !l.microActionCompleted);
           
           if (!currentLearning || !currentLearning.module) {
               await this.replyWithMenu(context, userId, "No pending Micro Action found.");
@@ -1492,21 +1494,28 @@ class TeamsBot extends TeamsActivityHandler {
             feedback += "❌ **You didn't pass this time.** You have one more attempt to get a better score!\n\n";
             // Do NOT show answers on first fail
         } else if (isSecondFail) {
-            feedback += "❌ **You didn't pass your final attempt.** Let's review the correct answers before moving forward:\n\n";
+            feedback += "❌ **You didn't pass this attempt either.** To help you learn, here are the correct choices for the questions you missed. We'll move you forward to the next step now so you can keep building your skills!\n\n";
             if (result.responses) {
                 result.responses.forEach((resp, idx) => {
                     const statusLabel = resp.correct ? "✅ CORRECT" : "❌ INCORRECT";
                     feedback += `${idx + 1}. ${statusLabel}\n`;
                     if (!resp.correct) {
                         feedback += `   Your answer: *${resp.answer}*\n`;
-                        feedback += `   Correct answer: **${resp.correctAnswer}**\n`;
+                        feedback += `   Correct choice: **${resp.correctAnswer}**\n`;
+                    } else {
+                        feedback += `   Your answer: *${resp.answer}*\n`;
                     }
                 });
             }
         }
 
-        if (learning && result.result === "passed") {
-          learning.quizPassedAt = new Date().toISOString();
+        if (learning) {
+          learning.attempts = Array.isArray(learning.attempts) ? learning.attempts : [];
+          learning.attempts.push(result);
+          if (result.result === "passed") {
+            learning.quizPassedAt = new Date().toISOString();
+          }
+          learning.status = "completed"; // Force completion state
           await saveResponseProgress(userResponse);
         }
 
