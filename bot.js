@@ -580,7 +580,9 @@ async function getGlobalMenuActions(userId, assessmentCompleted, learningStatus)
     }
 
     actions.push({ title: "📝 Log AI Usage", action: "trigger_logusage", text: "log ai usage" });
-
+    actions.push({ title: "📊 My Usage", action: "trigger_myusage", text: "my usage" });
+    actions.push({ title: "🔄 Re-take Assessment", action: "trigger_assessment", text: "re-take assessment" });
+  }
   return actions;
 }
 
