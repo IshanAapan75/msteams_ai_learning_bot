@@ -1654,7 +1654,6 @@ class TeamsBot extends TeamsActivityHandler {
 
     await this.replyWithMenu(context, userId, completionMessage);
   }
-  }
 
   async ensureUserExists(context, userId, userName) {
     const fallback = {
