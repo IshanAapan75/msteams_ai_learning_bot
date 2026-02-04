@@ -1,8 +1,8 @@
 const { containers } = require("../../../lib/cosmos.js");
 const { NextResponse } = require("next/server");
-const { awardXpAction } = require("../../../lib/rewards");
+const { awardXpAction } = require("../../../lib/rewards.js");
 const { ensureUserHasProfile } = require("../../../lib/users.js");
-const { upsertLearningEntry } = require("../../../lib/learningProgress");
+const { upsertLearningEntry } = require("../../../lib/learningProgress.js");
 const { recordSurveyAndAssignNext, syncLearningAssignment } = require("../../../lib/learningPlan.js");
 
 async function upsertResponseStatus({ userId, microLearningId, status, quizzes = [] }) {

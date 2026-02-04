@@ -1,8 +1,8 @@
 const { containers } = require("../../../../lib/cosmos.js");
-const { addXp } = require("../../../../lib/xp");
-const { assignBadges } = require("../../../../lib/badges");
-const { awardXpAction, syncRewardBadges } = require("../../../../lib/rewards");
-const { markQuizAttempt } = require("../../../../lib/learningProgress");
+const { addXp } = require("../../../../lib/xp.js");
+const { assignBadges } = require("../../../../lib/badges.js");
+const { awardXpAction, syncRewardBadges } = require("../../../../lib/rewards.js");
+const { markQuizAttempt } = require("../../../../lib/learningProgress.js");
 const { recordQuizResult } = require("../../../../lib/learningPlan.js");
 const { NextResponse } = require("next/server");
 

@@ -1,12 +1,12 @@
-const { containers } = require("../../../../lib/cosmos");
+const { containers } = require("../../../../lib/cosmos.js");
 const { NextResponse } = require("next/server");
-const { awardXpAction } = require("../../../../lib/rewards");
-const { upsertUserProfile } = require("../../../../lib/users");
-const { initializeUserRewards } = require("../../../../lib/rewards");
-const { calculateFluencyScore } = require("../../../../lib/fluency");
-const { fetchResponseProgress, saveResponseProgress } = require("../../../../lib/learningProgress");
+const { awardXpAction } = require("../../../../lib/rewards.js");
+const { upsertUserProfile } = require("../../../../lib/users.js");
+const { initializeUserRewards } = require("../../../../lib/rewards.js");
+const { calculateFluencyScore } = require("../../../../lib/fluency.js");
+const { fetchResponseProgress, saveResponseProgress } = require("../../../../lib/learningProgress.js");
 const { COOLDOWN_MS } = require("../../../../lib/learningPlan.js");
-const { assignBadges } = require("../../../../lib/badges");
+const { assignBadges } = require("../../../../lib/badges.js");
 
 async function POST(request) {
   try {

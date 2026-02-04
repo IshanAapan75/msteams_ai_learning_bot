@@ -1,7 +1,7 @@
-const { containers } = require("../../../lib/cosmos.js");
+const { containers } = require("../../../../lib/cosmos.js");
 const { NextResponse } = require("next/server");
-const { upsertUserProfile, sanitizeUser } = require("../../../lib/users.js");
-const { fetchResponseProgress } = require("../../../lib/learningProgress.js");
+const { upsertUserProfile, sanitizeUser } = require("../../../../lib/users.js");
+const { fetchResponseProgress } = require("../../../../lib/learningProgress.js");
 
 async function GET(req) {
   try {

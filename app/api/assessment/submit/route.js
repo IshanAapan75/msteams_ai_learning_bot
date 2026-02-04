@@ -1,9 +1,9 @@
-const { containers } = require("../../../../lib/cosmos");
+const { containers } = require("../../../../lib/cosmos.js");
 const { NextResponse } = require("next/server");
-const { upsertUserProfile } = require("../../../../lib/users");
-const { getXpForLevel } = require("../../../../lib/xp");
-const { initializeUserRewards } = require("../../../../lib/rewards");
-const { fetchResponseProgress, saveResponseProgress } = require("../../../../lib/learningProgress");
+const { upsertUserProfile } = require("../../../../lib/users.js");
+const { getXpForLevel } = require("../../../../lib/xp.js");
+const { initializeUserRewards } = require("../../../../lib/rewards.js");
+const { fetchResponseProgress, saveResponseProgress } = require("../../../../lib/learningProgress.js");
 const { fetchLearningCatalog } = require("../../../../lib/learningPlan.js");
 
 const DEFAULT_SCORING_CONFIG = {

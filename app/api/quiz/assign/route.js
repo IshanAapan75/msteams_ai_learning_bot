@@ -5,7 +5,7 @@ const {
   getLearningEntry,
   getPendingAttempts,
   upsertLearningEntry,
-} = require("../../../../lib/learningProgress");
+} = require("../../../../lib/learningProgress.js");
 const { syncLearningAssignment } = require("../../../../lib/learningPlan.js");
 const { ensureUserHasProfile } = require("../../../../lib/users.js");
 
