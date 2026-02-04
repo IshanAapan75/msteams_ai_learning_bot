@@ -584,7 +584,7 @@ async function getGlobalMenuActions(userId, assessmentCompleted, learningStatus)
 
     actions.push({ title: "📝 Log AI Usage", action: "trigger_logusage", text: "log ai usage" });
     actions.push({ title: "📊 My Usage", action: "trigger_myusage", text: "my usage" });
-    actions.push({ title: "🔄 Re-take Assessment", action: "trigger_assessment", text: "re-take assessment" });
+    actions.push({ title: "📈 Fluency Score", action: "trigger_fluency_score", text: "fluency score" });
   }
   return actions;
 }
@@ -722,7 +722,7 @@ class TeamsBot extends TeamsActivityHandler {
         return;
       }
 
-      if (action === "trigger_assessment" || text === "start assessment" || text === "re-take assessment") {
+      if (action === "trigger_assessment" || text === "start assessment") {
           await this.handleAssessmentCommand(context, state, userId);
           await this.conversationState.saveChanges(context);
           return;
@@ -743,6 +743,10 @@ class TeamsBot extends TeamsActivityHandler {
       }
       if (action === "trigger_myusage" || text === "my usage") {
           await this.handleMyUsageCommand(context, userId);
+          return;
+      }
+      if (action === "trigger_fluency_score" || text === "fluency score") {
+          await this.handleFluencyScoreCommand(context, userId);
           return;
       }
       if (action === "trigger_micro_action" || text === "micro action") {
@@ -1054,6 +1058,71 @@ class TeamsBot extends TeamsActivityHandler {
       console.error("[Bot] Failed to fetch user usages", error);
       await this.replyWithMenu(context, userId, "Sorry, I couldn't retrieve your AI usages right now.");
     }
+  }
+
+  async handleFluencyScoreCommand(context, userId) {
+      try {
+          const { resource: rewardRecord } = await containers.rewards.item(userId, userId).read();
+          
+          if (!rewardRecord) {
+              await this.replyWithMenu(context, userId, "I couldn't find your fluency score yet. Have you completed the initial assessment?");
+              return;
+          }
+
+          const score = rewardRecord.fluency || 0;
+          const tier = rewardRecord.tier || "AI Rookie";
+          const components = rewardRecord.fluencyComponents || {};
+
+          const scoreCard = CardFactory.adaptiveCard({
+              $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+              version: "1.4",
+              type: "AdaptiveCard",
+              body: [
+                  { type: "TextBlock", text: "📈 Your AI Fluency Score", weight: "bolder", size: "large", color: "accent" },
+                  { 
+                      type: "ColumnSet",
+                      spacing: "medium",
+                      columns: [
+                          {
+                              type: "Column",
+                              width: "stretch",
+                              items: [
+                                  { type: "TextBlock", text: `${score}`, size: "extraLarge", weight: "bolder", color: "good", horizontalAlignment: "center" },
+                                  { type: "TextBlock", text: "Current Score", isSubtle: true, horizontalAlignment: "center", spacing: "none" }
+                              ]
+                          },
+                          {
+                              type: "Column",
+                              width: "stretch",
+                              items: [
+                                  { type: "TextBlock", text: tier, size: "large", weight: "bolder", wrap: true, horizontalAlignment: "center" },
+                                  { type: "TextBlock", text: "Current Tier", isSubtle: true, horizontalAlignment: "center", spacing: "none" }
+                              ]
+                          }
+                      ]
+                  },
+                  {
+                      type: "FactSet",
+                      spacing: "large",
+                      separator: true,
+                      facts: [
+                          { title: "Assessments", value: `${components.assessments || 0} pts` },
+                          { title: "Daily Usage", value: `${components.usage || 0} pts` },
+                          { title: "Skill Quality", value: `${components.quality || 0} pts` },
+                          { title: "Confidence", value: `${components.confidence || 0} pts` },
+                          { title: "Consistency", value: `${components.consistency || 0} pts` }
+                      ]
+                  }
+              ]
+          });
+
+          await context.sendActivity({ attachments: [scoreCard] });
+          await this.replyWithMenu(context, userId, "");
+
+      } catch (error) {
+          console.error("[Bot] Failed to fetch fluency score", error);
+          await this.replyWithMenu(context, userId, "Sorry, I ran into an error while checking your score.");
+      }
   }
 
   async handleMicroActionTrigger(context, userId) {
@@ -1509,12 +1578,8 @@ class TeamsBot extends TeamsActivityHandler {
             }
         }
 
-        if (learning) {
-          learning.attempts = Array.isArray(learning.attempts) ? learning.attempts : [];
-          learning.attempts.push(result);
-          if (result.result === "passed") {
-            learning.quizPassedAt = new Date().toISOString();
-          }
+        if (learning && result.result === "passed") {
+          learning.quizPassedAt = new Date().toISOString();
           learning.status = "completed"; // Force completion state
           await saveResponseProgress(userResponse);
         }
