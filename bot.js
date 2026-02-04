@@ -1180,12 +1180,19 @@ class TeamsBot extends TeamsActivityHandler {
 
           // Assign next module
           const userResponse = await fetchResponseProgress(userId);
+          const finishedModule = await loadModuleDetails(learningId);
           const assignedNext = await assignNextLearning(userId, learningId, userResponse);
           await saveResponseProgress(userResponse);
 
           let message = "Thanks for the feedback!";
+          
           if (assignedNext) {
-              message += `\n\n🎉 Good news! Your next learning module "**${assignedNext.module.title}**" is now UNLOCKED and ready for you.`;
+              // Tier Check
+              const nextModule = assignedNext.module;
+              if (finishedModule && nextModule && nextModule.tier && finishedModule.tier !== nextModule.tier) {
+                  message += `\n\n🎖️ **Congratulations!** You've been promoted to **${nextModule.tier}**!`;
+              }
+              message += `\n\n🎉 Good news! Your next learning module "**${nextModule.title}**" is now UNLOCKED and ready for you.`;
           }
 
           await this.replyWithMenu(context, userId, message);
@@ -1564,16 +1571,19 @@ class TeamsBot extends TeamsActivityHandler {
             // Do NOT show answers on first fail
         } else if (isSecondFail) {
             feedback += "❌ **You didn't pass this attempt either.** To help you learn, here are the correct choices for the questions you missed. We'll move you forward to the next step now so you can keep building your skills!\n\n";
-            if (result.responses) {
+            if (result.responses && Array.isArray(result.responses)) {
                 result.responses.forEach((resp, idx) => {
-                    const statusLabel = resp.correct ? "✅ CORRECT" : "❌ INCORRECT";
-                    feedback += `${idx + 1}. ${statusLabel}\n`;
-                    if (!resp.correct) {
-                        feedback += `   Your answer: *${resp.answer}*\n`;
-                        feedback += `   Correct choice: **${resp.correctAnswer}**\n`;
-                    } else {
-                        feedback += `   Your answer: *${resp.answer}*\n`;
+                    const isCorrect = Boolean(resp.correct);
+                    const statusEmoji = isCorrect ? "✅" : "❌";
+                    const statusText = isCorrect ? "CORRECT" : "INCORRECT";
+                    
+                    feedback += `${idx + 1}. ${statusEmoji} **${statusText}**\n`;
+                    feedback += `   Your answer: *${resp.answer || "No answer"}*\n`;
+                    
+                    if (!isCorrect) {
+                        feedback += `   Correct choice: **${resp.correctAnswer || "N/A"}**\n`;
                     }
+                    feedback += "\n";
                 });
             }
         }
@@ -1640,14 +1650,10 @@ class TeamsBot extends TeamsActivityHandler {
     // ONLY show progression if passed or 2nd fail
     if (quizResult === "passed" || attemptCount >= 2) {
         completionMessage += `\n\n🎉 All quizzes completed!`;
-        
-        // Tier Check
-        if (finishedModule && nextModule && nextModule.tier && finishedModule.tier !== nextModule.tier) {
-            completionMessage += `\n\n🎖️ **Congratulations!** You've been promoted to **${nextModule.tier}**!`;
-        }
     }
 
     await this.replyWithMenu(context, userId, completionMessage);
+  }
   }
 
   async ensureUserExists(context, userId, userName) {
