@@ -100,12 +100,13 @@ export async function POST(req) {
     });
 
     const xpResult = addXp(user.xp || 0, rewardResult.xpDelta);
-    const badges = await assignBadges({ ...user, ...xpResult });
+    const badges = await assignBadges({ ...user, ...xpResult, streak: rewardResult.streak });
 
     await containers.users.item(userId, userId).replace({
       ...user,
       ...xpResult,
       badges,
+      streak: rewardResult.streak
     });
 
     const totalXpEarned = evaluatedResponses.reduce((sum, entry) => {

@@ -2,6 +2,7 @@ import { containers } from "../../../../lib/cosmos";
 import { NextResponse } from "next/server";
 import { awardXpAction } from "../../../../lib/rewards";
 import { upsertUserProfile } from "../../../../lib/users";
+import { assignBadges } from "../../../../lib/badges";
 import { initializeUserRewards } from "../../../../lib/rewards";
 import { calculateFluencyScore } from "../../../../lib/fluency";
 import { fetchResponseProgress, saveResponseProgress } from "../../../../lib/learningProgress";
@@ -89,12 +90,13 @@ export async function POST(request) {
     // We need to fetch the current profile to preserve other fields like language
     const { resource: currentProfile } = await containers.users.item(userId, userId).read();
     
+    const badges = await assignBadges({ ...currentProfile, streak: newStreak });
+
     await upsertUserProfile({
         id: userId,
         fluencyScore: newFluencyScore,
-        // We only update fluency here, keeping existing XP/Level unless XP logic changed it (which calculateXpAndStreak does internally? No, it usually returns values).
-        // Actually calculateXpAndStreak updates the 'rewards' container but maybe not 'users' profile XP.
-        // Let's ensure we sync everything.
+        badges,
+        streak: newStreak
     });
 
     // We also need to sync the Rewards container with the new Fluency Score
