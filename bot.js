@@ -1430,7 +1430,6 @@ class TeamsBot extends TeamsActivityHandler {
     state.questionIndex = 0;
     state.currentResponses = [];
     
-    const feedback = context.turnState.get("quiz_feedback") || "";
     const finishedModule = await loadModuleDetails(state.microLearningId);
     const assignment = await fetchAssignment(userId);
     const nextModule = assignment?.assignment?.module;
