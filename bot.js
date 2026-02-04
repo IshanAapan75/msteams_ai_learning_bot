@@ -2,8 +2,8 @@ const { TeamsActivityHandler, CardFactory, MessageFactory, ActionTypes, TurnCont
 const { TeamsInfo } = require("botbuilder");
 const { upsertUserProfile } = require("./lib/users");
 const { containers } = require("./lib/cosmos");
-const { syncLearningAssignment, recordSurveyAndAssignNext, COOLDOWN_MS, fetchLearningCatalog } = require("./lib/learningPlan.js");
-const { fetchResponseProgress, saveResponseProgress } = require("./lib/learningProgress.js");
+const { syncLearningAssignment, recordSurveyAndAssignNext, COOLDOWN_MS, fetchLearningCatalog, assignNextLearning } = require("./lib/learningPlan.js");
+const { fetchResponseProgress, saveResponseProgress, updateLearningEntry } = require("./lib/learningProgress.js");
 const { awardXpAction } = require("./lib/rewards.js");
 const appUrl = process.env.APP_URL || "http://localhost:3000";
 
@@ -547,31 +547,40 @@ async function updateUserLanguage(userId, language) {
 async function getGlobalMenuActions(userId, assessmentCompleted, learningStatus) {
   const actions = [];
   
-  // Check for Retake Quiz eligibility
+  // Check for Retake Quiz or Micro Action eligibility
   let showRetake = false;
+  let showMicroAction = false;
   try {
       const userResponse = await fetchResponseProgress(userId);
-      const currentLearning = userResponse.learnings?.find(l => l.status === 'completed' && !l.quizPassedAt);
-      if (currentLearning && currentLearning.attempts?.length === 1) {
-          showRetake = true;
+      const currentLearning = userResponse.learnings?.find(l => l.status === 'completed');
+      
+      if (currentLearning) {
+          if (!currentLearning.quizPassedAt && currentLearning.attempts?.length === 1) {
+              showRetake = true;
+          } else if ((currentLearning.quizPassedAt || currentLearning.attempts?.length >= 2) && !currentLearning.microActionCompleted) {
+              showMicroAction = true;
+          }
       }
   } catch (err) {}
 
   if (!assessmentCompleted) {
     actions.push({ title: "🧠 Start Assessment", action: "trigger_assessment", text: "start assessment" });
   } else {
-    actions.push({ title: "📘 View Learning", action: "trigger_learning", text: "view learning" });
+    // Show Micro Action instead of View Learning if pending
+    if (showMicroAction) {
+        actions.push({ title: "⚡ Micro Action", action: "trigger_micro_action", text: "micro action" });
+    } else if (learningStatus === "available") {
+        actions.push({ title: "📘 View Learning", action: "trigger_learning", text: "view learning" });
+    }
     
     if (showRetake) {
         actions.push({ title: "🔄 Retake Quiz", action: "trigger_quiz", text: "start quiz" });
-    } else if (learningStatus === "completed") {
+    } else if (learningStatus === "completed" && !showMicroAction) {
       actions.push({ title: "🎯 Start Quiz", action: "trigger_quiz", text: "start quiz" });
     }
 
     actions.push({ title: "📝 Log AI Usage", action: "trigger_logusage", text: "log ai usage" });
-    actions.push({ title: "📊 My Usage", action: "trigger_myusage", text: "my usage" });
-    actions.push({ title: "🔄 Re-take Assessment", action: "trigger_assessment", text: "re-take assessment" });
-  }
+
   return actions;
 }
 
@@ -729,6 +738,14 @@ class TeamsBot extends TeamsActivityHandler {
       }
       if (action === "trigger_myusage" || text === "my usage") {
           await this.handleMyUsageCommand(context, userId);
+          return;
+      }
+      if (action === "trigger_micro_action" || text === "micro action") {
+          await this.handleMicroActionTrigger(context, userId);
+          return;
+      }
+      if (action === "submit_micro_action") {
+          await this.handleMicroActionSubmit(context, userId, context.activity.value);
           return;
       }
 
@@ -1032,6 +1049,74 @@ class TeamsBot extends TeamsActivityHandler {
       console.error("[Bot] Failed to fetch user usages", error);
       await this.replyWithMenu(context, userId, "Sorry, I couldn't retrieve your AI usages right now.");
     }
+  }
+
+  async handleMicroActionTrigger(context, userId) {
+      try {
+          const userResponse = await fetchResponseProgress(userId);
+          const currentLearning = userResponse.learnings?.find(l => l.status === 'completed' && !l.microActionCompleted);
+          
+          if (!currentLearning || !currentLearning.module) {
+              await this.replyWithMenu(context, userId, "No pending Micro Action found.");
+              return;
+          }
+
+          const module = currentLearning.module;
+          const card = CardFactory.adaptiveCard({
+              $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+              version: "1.4",
+              type: "AdaptiveCard",
+              body: [
+                  { type: "TextBlock", text: "⚡ Micro Action", weight: "bolder", size: "large", color: "accent" },
+                  { type: "TextBlock", text: "Put your learning into practice with this quick task:", wrap: true, spacing: "medium" },
+                  { type: "TextBlock", text: module.microAction || "Try applying today's concept in your next AI interaction.", weight: "bolder", wrap: true, spacing: "small" },
+                  { type: "TextBlock", text: "Example Prompt:", wrap: true, spacing: "medium", isSubtle: true },
+                  { type: "TextBlock", text: `_"${module.examplePrompt || "N/A"}"_`, wrap: true, spacing: "small", fontType: "monospace" },
+                  { type: "TextBlock", text: "Did you try this Micro Action?", wrap: true, spacing: "large" }
+              ],
+              actions: [
+                  { type: "Action.Submit", title: "Yes ✅", data: { action: "submit_micro_action", choice: "yes", learningId: module.id } },
+                  { type: "Action.Submit", title: "No ❌", data: { action: "submit_micro_action", choice: "no", learningId: module.id } }
+              ]
+          });
+
+          await context.sendActivity({ attachments: [card] });
+      } catch (error) {
+          console.error("[Bot] Micro Action trigger failed", error);
+          await this.replyWithMenu(context, userId, "Sorry, I couldn't load the Micro Action right now.");
+      }
+  }
+
+  async handleMicroActionSubmit(context, userId, value) {
+      const { choice, learningId } = value;
+      try {
+          if (choice === "yes") {
+              await awardXpAction({
+                  userId,
+                  actionType: "micro-action",
+                  metadata: { details: { learningId, awarded: "bonus_xp" } }
+              });
+              await context.sendActivity("🌟 **Awesome!** You've earned **10 bonus XP** for taking action.");
+          }
+
+          // Mark as complete in user progress
+          await updateLearningEntry(userId, learningId, { microActionCompleted: true });
+
+          // Assign next module
+          const userResponse = await fetchResponseProgress(userId);
+          const assignedNext = await assignNextLearning(userId, learningId, userResponse);
+          await saveResponseProgress(userResponse);
+
+          let message = "Thanks for the feedback!";
+          if (assignedNext) {
+              message += `\n\n🎉 Good news! Your next learning module "**${assignedNext.module.title}**" is now UNLOCKED and ready for you.`;
+          }
+
+          await this.replyWithMenu(context, userId, message);
+      } catch (error) {
+          console.error("[Bot] Micro Action submission failed", error);
+          await this.replyWithMenu(context, userId, "I hit an error while recording your action. Let's keep going!");
+      }
   }
 
   async assignFirstLearningModule(context, userId) {
@@ -1380,7 +1465,8 @@ class TeamsBot extends TeamsActivityHandler {
         const userResponse = await fetchResponseProgress(userId);
         const learning = userResponse?.learnings?.find((entry) => entry.learningId === state.microLearningId);
         
-        const attemptCount = (learning?.attempts?.length || 0) + 1;
+        // The API already added the attempt, so we just count the total now
+        const attemptCount = learning?.attempts?.length || 1;
         const isFirstFail = result.result !== "passed" && attemptCount === 1;
         const isSecondFail = result.result !== "passed" && attemptCount >= 2;
 
@@ -1414,13 +1500,8 @@ class TeamsBot extends TeamsActivityHandler {
             }
         }
 
-        if (learning) {
-          learning.attempts = Array.isArray(learning.attempts) ? learning.attempts : [];
-          learning.attempts.push(result);
-          if (result.result === "passed") {
-            learning.quizPassedAt = new Date().toISOString();
-          }
-          learning.status = "completed";
+        if (learning && result.result === "passed") {
+          learning.quizPassedAt = new Date().toISOString();
           await saveResponseProgress(userResponse);
         }
 
