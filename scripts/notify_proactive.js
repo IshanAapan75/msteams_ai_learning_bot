@@ -21,7 +21,7 @@ async function runNotifications() {
         if (!user.conversationReference) continue;
 
         try {
-            await checkUnlockNotifications(user);
+            // await checkUnlockNotifications(user); // Disabled for 0-cooldown mode
             await checkStreakNotification(user);
             await checkUsageReminder(user);
         } catch (err) {
