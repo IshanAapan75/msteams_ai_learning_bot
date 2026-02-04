@@ -544,46 +544,13 @@ async function updateUserLanguage(userId, language) {
   return res.json();
 }
 
-function buildMainMenuCard(assessmentCompleted = false, learningStatus = "available") {
-  const actions = [];
+async function buildMainMenuCard(userId, assessmentCompleted = false, learningStatus = "available") {
+  // Use the internal helper to get actions consistently
+  // Since this is a global function, we need a way to reach the bot's method or just duplicate logic.
+  // Better: Extract logic to a standalone helper.
   
-  if (!assessmentCompleted) {
-    actions.push({
-      type: "Action.Submit",
-      title: "🧠 Start Assessment",
-      data: { action: "trigger_assessment" }
-    });
-  } else {
-    actions.push({
-      type: "Action.Submit",
-      title: "📘 View Learning",
-      data: { action: "trigger_learning" }
-    });
-
-    if (learningStatus === "completed") {
-      actions.push({
-        type: "Action.Submit",
-        title: "🎯 Start Quiz",
-        data: { action: "trigger_quiz" }
-      });
-    }
-
-    actions.push({
-      type: "Action.Submit",
-      title: "📝 Log AI Usage",
-      data: { action: "trigger_logusage" }
-    });
-    actions.push({
-      type: "Action.Submit",
-      title: "📊 My Usage",
-      data: { action: "trigger_myusage" }
-    });
-    actions.push({
-      type: "Action.Submit",
-      title: "🔄 Re-take Assessment",
-      data: { action: "trigger_assessment" }
-    });
-  }
+  const botInstance = new TeamsBot(); // Temporary for accessing helper, better to move helper out.
+  const actions = await botInstance.getMenuActions(userId, assessmentCompleted, learningStatus);
 
   return CardFactory.adaptiveCard({
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -824,8 +791,8 @@ class TeamsBot extends TeamsActivityHandler {
     });
   }
 
-  async sendMainMenuSuggestedActions(context, assessmentCompleted = false, learningStatus = "available", text = "How can I help you today?") {
-    const actions = this.getMenuActions(assessmentCompleted, learningStatus);
+  async sendMainMenuSuggestedActions(context, userId, assessmentCompleted = false, learningStatus = "available", text = "How can I help you today?") {
+    const actions = await this.getMenuActions(userId, assessmentCompleted, learningStatus);
     const message = MessageFactory.suggestedActions(actions, text);
     await context.sendActivity(message);
   }
@@ -847,7 +814,7 @@ class TeamsBot extends TeamsActivityHandler {
       }
       
       // Attach the menu buttons card
-      const menuCard = buildMainMenuCard(assessmentCompleted, learningStatus);
+      const menuCard = await buildMainMenuCard(userId, assessmentCompleted, learningStatus);
       await context.sendActivity({ attachments: [menuCard] });
   }
 
@@ -1370,27 +1337,43 @@ class TeamsBot extends TeamsActivityHandler {
         await context.sendActivity(body.error || "Couldn't submit that quiz. Try again later.");
       } else {
         const result = await res.json();
+        const userResponse = await fetchResponseProgress(userId);
+        const learning = userResponse?.learnings?.find((entry) => entry.learningId === state.microLearningId);
         
-        // Build a detailed feedback message for all questions
+        const attemptCount = (learning?.attempts?.length || 0) + 1;
+        const isFirstFail = result.result !== "passed" && attemptCount === 1;
+        const isSecondFail = result.result !== "passed" && attemptCount >= 2;
+
+        // Build feedback
         let feedback = `📊 **Quiz Summary**\n`;
         feedback += `Score: ${result.score.correct}/${result.score.total}\n\n`;
         
-        if (result.responses) {
-          feedback += "🔍 **Question Review:**\n";
-          result.responses.forEach((resp, idx) => {
-            const statusLabel = resp.correct ? "✅ CORRECT" : "❌ INCORRECT";
-            feedback += `${idx + 1}. ${statusLabel}\n`;
-            feedback += `   Your answer: *${resp.answer}*\n`;
-            if (!resp.correct) {
-              feedback += `   Correct answer: **${resp.correctAnswer}**\n`;
+        if (result.result === "passed") {
+            feedback += "✅ **Well done! You've passed the quiz.**\n\n";
+            // Show review for passed quiz
+            if (result.responses) {
+                feedback += "🔍 **Question Review:**\n";
+                result.responses.forEach((resp, idx) => {
+                    feedback += `${idx + 1}. ✅ CORRECT: *${resp.answer}*\n`;
+                });
             }
-          });
-          feedback += "\n";
+        } else if (isFirstFail) {
+            feedback += "❌ **You didn't pass this time.** You have one more attempt to get a better score!\n\n";
+            // Do NOT show answers on first fail
+        } else if (isSecondFail) {
+            feedback += "❌ **You didn't pass your final attempt.** Let's review the correct answers before moving forward:\n\n";
+            if (result.responses) {
+                result.responses.forEach((resp, idx) => {
+                    const statusLabel = resp.correct ? "✅ CORRECT" : "❌ INCORRECT";
+                    feedback += `${idx + 1}. ${statusLabel}\n`;
+                    if (!resp.correct) {
+                        feedback += `   Your answer: *${resp.answer}*\n`;
+                        feedback += `   Correct answer: **${resp.correctAnswer}**\n`;
+                    }
+                });
+            }
         }
 
-        const userResponse = await fetchResponseProgress(userId);
-
-        const learning = userResponse?.learnings?.find((entry) => entry.learningId === state.microLearningId);
         if (learning) {
           learning.attempts = Array.isArray(learning.attempts) ? learning.attempts : [];
           learning.attempts.push(result);
@@ -1401,11 +1384,9 @@ class TeamsBot extends TeamsActivityHandler {
           await saveResponseProgress(userResponse);
         }
 
-        if (result.result === "passed") {
-            context.turnState.set("quiz_feedback", feedback + "✅ Well done! You've passed the quiz.");
-        } else {
-            context.turnState.set("quiz_feedback", feedback + "❌ You didn't pass this time, but you can try again or move to the next module.");
-        }
+        context.turnState.set("quiz_result", result.result);
+        context.turnState.set("quiz_attempt_count", attemptCount);
+        context.turnState.set("quiz_feedback", feedback);
       }
     } catch (error) {
       console.error("[Bot] Error submitting quiz attempt", error);
@@ -1416,13 +1397,28 @@ class TeamsBot extends TeamsActivityHandler {
   }
 
   async moveToNextQuiz(context, state, userId) {
+    const quizResult = context.turnState.get("quiz_result");
+    const attemptCount = context.turnState.get("quiz_attempt_count");
+    const feedback = context.turnState.get("quiz_feedback") || "";
+
+    // BLOCK PROGRESSION on 1st Fail
+    if (quizResult !== "passed" && attemptCount === 1) {
+        state.inQuiz = false;
+        state.currentQuiz = null;
+        state.allQuizzes = [];
+        state.questionIndex = 0;
+        state.currentResponses = [];
+        
+        await this.replyWithMenu(context, userId, feedback);
+        return;
+    }
+
     state.currentQuizIndex = (state.currentQuizIndex || 0) + 1;
 
     if (state.currentQuizIndex < state.allQuizzes.length) {
       state.currentQuiz = state.allQuizzes[state.currentQuizIndex];
       state.questionIndex = 0;
       state.currentResponses = [];
-      const feedback = context.turnState.get("quiz_feedback") || "";
       await this.replyWithMenu(context, userId, `${feedback}\n\nNext quiz: **${state.currentQuiz.title}**. Let's keep going!`);
       await this.sendQuestion(context, state);
       return;
@@ -1433,13 +1429,27 @@ class TeamsBot extends TeamsActivityHandler {
     state.allQuizzes = [];
     state.questionIndex = 0;
     state.currentResponses = [];
-    const feedback = context.turnState.get("quiz_feedback") || "";
-    const assignment = await fetchAssignment(userId);
-    const nextTitle = assignment?.assignment?.module?.title || "Next Module";
     
-    let completionMessage = `${feedback}\n\n🎉 All quizzes completed!`;
-    if (assignment?.assignment) {
-        completionMessage += `\n\n🎉 Good news! Your next learning module "**${nextTitle}**" is now UNLOCKED and ready for you.`;
+    const feedback = context.turnState.get("quiz_feedback") || "";
+    const finishedModule = await loadModuleDetails(state.microLearningId);
+    const assignment = await fetchAssignment(userId);
+    const nextModule = assignment?.assignment?.module;
+    const nextTitle = nextModule?.title || "Next Module";
+    
+    let completionMessage = feedback;
+
+    // ONLY show progression if passed or 2nd fail
+    if (quizResult === "passed" || attemptCount >= 2) {
+        completionMessage += `\n\n🎉 All quizzes completed!`;
+        
+        // Tier Check
+        if (finishedModule && nextModule && nextModule.tier && finishedModule.tier !== nextModule.tier) {
+            completionMessage += `\n\n🎖️ **Congratulations!** You've been promoted to **${nextModule.tier}**!`;
+        }
+
+        if (assignment?.assignment) {
+            completionMessage += `\n\n🎉 Good news! Your next learning module "**${nextTitle}**" is now UNLOCKED and ready for you.`;
+        }
     }
 
     await this.replyWithMenu(context, userId, completionMessage);
@@ -1581,15 +1591,30 @@ class TeamsBot extends TeamsActivityHandler {
     await context.sendActivity({ attachments: [card] });
   }
 
-  getMenuActions(assessmentCompleted, learningStatus) {
+  async getMenuActions(userId, assessmentCompleted, learningStatus) {
     const actions = [];
+    
+    // Check for Retake Quiz eligibility
+    let showRetake = false;
+    try {
+        const userResponse = await fetchResponseProgress(userId);
+        const currentLearning = userResponse.learnings?.find(l => l.status === 'completed' && !l.quizPassedAt);
+        if (currentLearning && currentLearning.attempts?.length === 1) {
+            showRetake = true;
+        }
+    } catch (err) {}
+
     if (!assessmentCompleted) {
       actions.push({ title: "🧠 Start Assessment", type: ActionTypes.MessageBack, text: "start assessment", displayText: "Start Assessment", value: { action: "trigger_assessment" } });
     } else {
       actions.push({ title: "📘 View Learning", type: ActionTypes.MessageBack, text: "view learning", displayText: "View Learning", value: { action: "trigger_learning" } });
-      if (learningStatus === "completed") {
+      
+      if (showRetake) {
+          actions.push({ title: "🔄 Retake Quiz", type: ActionTypes.MessageBack, text: "start quiz", displayText: "Retake Quiz", value: { action: "trigger_quiz" } });
+      } else if (learningStatus === "completed") {
         actions.push({ title: "🎯 Start Quiz", type: ActionTypes.MessageBack, text: "start quiz", displayText: "Start Quiz", value: { action: "trigger_quiz" } });
       }
+
       actions.push({ title: "📝 Log AI Usage", type: ActionTypes.MessageBack, text: "log ai usage", displayText: "Log AI Usage", value: { action: "trigger_logusage" } });
       actions.push({ title: "📊 My Usage", type: ActionTypes.MessageBack, text: "my usage", displayText: "My Usage", value: { action: "trigger_myusage" } });
       actions.push({ title: "🔄 Re-take Assessment", type: ActionTypes.MessageBack, text: "re-take assessment", displayText: "Re-take Assessment", value: { action: "trigger_assessment" } });
