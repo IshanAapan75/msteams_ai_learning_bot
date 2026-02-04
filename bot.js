@@ -1048,12 +1048,11 @@ class TeamsBot extends TeamsActivityHandler {
         return false;
       }
 
-      // 1. Get the sorted catalog and pick the very first item
-      const catalog = await fetchLearningCatalog(userId);
-      const firstModule = catalog[0];
+      // 1. Strictly pick the module with ID 'micro-learning-day-1'
+      const { resource: firstModule } = await containers.ai_learning.item('micro-learning-day-1', 'micro-learning-day-1').read();
 
       if (!firstModule) {
-        console.warn("[Bot] No modules found in catalog to assign.");
+        console.warn("[Bot] micro-learning-day-1 not found in catalog.");
         return false;
       }
 

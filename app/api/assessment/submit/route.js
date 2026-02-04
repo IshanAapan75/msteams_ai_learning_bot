@@ -118,13 +118,9 @@ export async function POST(request) {
         fluencyScore
     });
     
-    // Auto-assign first learning module if it doesn't exist
-    const userResponse = await fetchResponseProgress(userId);
-
     if (!userResponse.learnings || userResponse.learnings.length === 0) {
-        // Strictly pick the module at the top of the sorted catalog
-        const catalog = await fetchLearningCatalog(userId);
-        const firstModule = catalog[0];
+        // Strictly pick the module with ID 'micro-learning-day-1'
+        const { resource: firstModule } = await containers.ai_learning.item('micro-learning-day-1', 'micro-learning-day-1').read();
 
         if (firstModule) {
             const nowIso = new Date().toISOString();
