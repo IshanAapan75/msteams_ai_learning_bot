@@ -1554,17 +1554,20 @@ class TeamsBot extends TeamsActivityHandler {
         await context.sendActivity(body.error || "Couldn't submit that quiz. Try again later.");
       } else {
         const result = await res.json();
+        
+        // 1. Fetch fresh DB state AFTER the API has saved the attempt
         const userResponse = await fetchResponseProgress(userId);
         const learning = userResponse?.learnings?.find((entry) => entry.learningId === state.microLearningId);
         
-        // Count total attempts including the one we just finished
-        const attemptCount = (learning?.attempts?.length || 0) + (result ? 1 : 0);
+        // 2. Calculate attempt number based on DB array length
+        const attemptNum = learning?.attempts?.length || 1;
+        
         const isPassed = result.result === "passed";
-        const isFirstFail = !isPassed && attemptCount <= 1;
-        const isSecondFail = !isPassed && attemptCount >= 2;
+        const isFirstFail = !isPassed && attemptNum === 1;
+        const isSecondFail = !isPassed && attemptNum >= 2;
 
         // Build feedback
-        let feedback = `📊 **Quiz Summary**\n`;
+        let feedback = `📊 **Quiz Summary (Attempt ${attemptNum}/2)**\n`;
         feedback += `Score: ${result.score.correct}/${result.score.total}\n\n`;
         
         if (isPassed) {
@@ -1577,6 +1580,7 @@ class TeamsBot extends TeamsActivityHandler {
             }
         } else if (isFirstFail) {
             feedback += "❌ **You didn't pass this time.** You have one more attempt to get a better score!\n\n";
+            // Do NOT show answers on first fail
         } else if (isSecondFail) {
             feedback += "❌ **You didn't pass this attempt either.** To help you learn, here are the correct choices for the questions you missed. We'll move you forward to the next step now so you can keep building your skills!\n\n";
             const resps = result.responses || [];
@@ -1585,7 +1589,7 @@ class TeamsBot extends TeamsActivityHandler {
                 feedback += `${idx + 1}. ${itemCorrect ? "✅ **CORRECT**" : "❌ **INCORRECT**"}\n`;
                 feedback += `   Your answer: *${resp.answer || "N/A"}*\n`;
                 if (!itemCorrect) {
-                    feedback += `   Correct choice: **${resp.correctAnswer || "See module details"}**\n`;
+                    feedback += `   Correct choice: **${resp.correctAnswer || "Consult module content"}**\n`;
                 }
                 feedback += "\n";
             });
@@ -1598,7 +1602,7 @@ class TeamsBot extends TeamsActivityHandler {
         }
 
         context.turnState.set("quiz_result", result.result);
-        context.turnState.set("quiz_attempt_count", attemptCount);
+        context.turnState.set("quiz_attempt_count", attemptNum);
         context.turnState.set("quiz_feedback", feedback);
       }
     } catch (error) {
