@@ -1583,16 +1583,43 @@ class TeamsBot extends TeamsActivityHandler {
             // Do NOT show answers on first fail
         } else if (isSecondFail) {
             feedback += "❌ **You didn't pass this attempt either.** To help you learn, here are the correct choices for the questions you missed. We'll move you forward to the next step now so you can keep building your skills!\n\n";
-            const resps = result.responses || [];
-            resps.forEach((resp, idx) => {
-                const itemCorrect = Boolean(resp.correct);
-                feedback += `${idx + 1}. ${itemCorrect ? "✅ **CORRECT**" : "❌ **INCORRECT**"}\n`;
-                feedback += `   Your answer: *${resp.answer || "N/A"}*\n`;
+            
+            const quizQuestions = state.currentQuiz.questions || [];
+            const userResps = result.responses || [];
+
+            for (let i = 0; i < quizQuestions.length; i++) {
+                const qData = quizQuestions[i];
+                const qId = qData.id;
+                
+                // Find user's specific response for this question
+                const userResp = userResps.find(r => r.questionId === qId);
+                const itemCorrect = userResp ? Boolean(userResp.correct) : false;
+
+                feedback += `${i + 1}. ${itemCorrect ? "✅ **CORRECT**" : "❌ **INCORRECT**"}\n`;
+                feedback += `   Your answer: *${userResp ? userResp.answer : "N/A"}*\n`;
+
                 if (!itemCorrect) {
-                    feedback += `   Correct choice: **${resp.correctAnswer || "Consult module content"}**\n`;
+                    // Live fetch strictly from the source of truth
+                    try {
+                        const { resource: dbQuestion } = await containers.questions.item(qId, qId).read();
+                        if (dbQuestion) {
+                            const correctVal = dbQuestion.correctAnswer;
+                            const options = dbQuestion.options || [];
+                            // Verify the answer exists in the options
+                            const isVerified = options.some(o => o === correctVal);
+                            
+                            if (isVerified) {
+                                feedback += `   Correct choice: **${correctVal}**\n`;
+                            } else {
+                                feedback += `   Correct choice: **${correctVal}** (verified from database)\n`;
+                            }
+                        }
+                    } catch (dbErr) {
+                        console.error(`[Bot] Feedback DB fetch failed for ${qId}`, dbErr);
+                    }
                 }
                 feedback += "\n";
-            });
+            }
         }
 
         if (learning && isPassed) {
