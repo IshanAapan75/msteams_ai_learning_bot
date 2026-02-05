@@ -1557,18 +1557,18 @@ class TeamsBot extends TeamsActivityHandler {
         const userResponse = await fetchResponseProgress(userId);
         const learning = userResponse?.learnings?.find((entry) => entry.learningId === state.microLearningId);
         
-        // The API already added the attempt, so we just count the total now
-        const attemptCount = learning?.attempts?.length || 1;
-        const isFirstFail = result.result !== "passed" && attemptCount === 1;
-        const isSecondFail = result.result !== "passed" && attemptCount >= 2;
+        // Count total attempts including the one we just finished
+        const attemptCount = (learning?.attempts?.length || 0) + (result ? 1 : 0);
+        const isPassed = result.result === "passed";
+        const isFirstFail = !isPassed && attemptCount <= 1;
+        const isSecondFail = !isPassed && attemptCount >= 2;
 
         // Build feedback
         let feedback = `📊 **Quiz Summary**\n`;
         feedback += `Score: ${result.score.correct}/${result.score.total}\n\n`;
         
-        if (result.result === "passed") {
+        if (isPassed) {
             feedback += "✅ **Well done! You've passed the quiz.**\n\n";
-            // Show review for passed quiz
             if (result.responses) {
                 feedback += "🔍 **Question Review:**\n";
                 result.responses.forEach((resp, idx) => {
@@ -1577,25 +1577,23 @@ class TeamsBot extends TeamsActivityHandler {
             }
         } else if (isFirstFail) {
             feedback += "❌ **You didn't pass this time.** You have one more attempt to get a better score!\n\n";
-            // Do NOT show answers on first fail
         } else if (isSecondFail) {
             feedback += "❌ **You didn't pass this attempt either.** To help you learn, here are the correct choices for the questions you missed. We'll move you forward to the next step now so you can keep building your skills!\n\n";
             const resps = result.responses || [];
             resps.forEach((resp, idx) => {
-                const isCorrect = Boolean(resp.correct);
-                const statusEmoji = isCorrect ? "✅" : "❌";
-                feedback += `${idx + 1}. ${statusEmoji} **${isCorrect ? "CORRECT" : "INCORRECT"}**\n`;
+                const itemCorrect = Boolean(resp.correct);
+                feedback += `${idx + 1}. ${itemCorrect ? "✅ **CORRECT**" : "❌ **INCORRECT**"}\n`;
                 feedback += `   Your answer: *${resp.answer || "N/A"}*\n`;
-                if (!isCorrect) {
-                    feedback += `   Correct choice: **${resp.correctAnswer || "Check module content"}**\n`;
+                if (!itemCorrect) {
+                    feedback += `   Correct choice: **${resp.correctAnswer || "See module details"}**\n`;
                 }
                 feedback += "\n";
             });
         }
 
-        if (learning && result.result === "passed") {
+        if (learning && isPassed) {
           learning.quizPassedAt = new Date().toISOString();
-          learning.status = "completed"; // Force completion state
+          learning.status = "completed";
           await saveResponseProgress(userResponse);
         }
 
