@@ -1375,11 +1375,20 @@ class TeamsBot extends TeamsActivityHandler {
       await context.sendActivity({ attachments: [resultsCard] });
 
       const assigned = await this.assignFirstLearningModule(context, userId);
+      
+      // Fetch the fresh assignment status explicitly to ensure the button shows
+      const freshAssignment = await fetchAssignment(userId);
+      const learningStatus = freshAssignment?.assignment?.status || "available";
+
       if (assigned) {
-        await this.replyWithMenu(context, userId, "🎉 **Assessment Complete!**\n\n📘 Let's get started! Click 'View Learning' to open your first module.");
+        // Send the completion summary with the menu card attached
+        const menuCard = await buildMainMenuCard(userId, true, learningStatus);
+        await context.sendActivity({
+            attachments: [menuCard],
+            text: "🎉 **Assessment Complete!**\n\n📘 Let's get started! Click 'View Learning' to open your first module."
+        });
       } else {
-        const assignment = await fetchAssignment(userId);
-        if (assignment?.assignment) {
+        if (freshAssignment?.assignment) {
           await this.replyWithMenu(context, userId, "📘 You're all set. Click 'View Learning' to continue with your personalized module.");
         } else {
           await this.replyWithMenu(context, userId, "Your assessment is complete! How else can I help?");
@@ -1571,21 +1580,17 @@ class TeamsBot extends TeamsActivityHandler {
             // Do NOT show answers on first fail
         } else if (isSecondFail) {
             feedback += "❌ **You didn't pass this attempt either.** To help you learn, here are the correct choices for the questions you missed. We'll move you forward to the next step now so you can keep building your skills!\n\n";
-            if (result.responses && Array.isArray(result.responses)) {
-                result.responses.forEach((resp, idx) => {
-                    const isCorrect = Boolean(resp.correct);
-                    const statusEmoji = isCorrect ? "✅" : "❌";
-                    const statusText = isCorrect ? "CORRECT" : "INCORRECT";
-                    
-                    feedback += `${idx + 1}. ${statusEmoji} **${statusText}**\n`;
-                    feedback += `   Your answer: *${resp.answer || "No answer"}*\n`;
-                    
-                    if (!isCorrect) {
-                        feedback += `   Correct choice: **${resp.correctAnswer || "N/A"}**\n`;
-                    }
-                    feedback += "\n";
-                });
-            }
+            const resps = result.responses || [];
+            resps.forEach((resp, idx) => {
+                const isCorrect = Boolean(resp.correct);
+                const statusEmoji = isCorrect ? "✅" : "❌";
+                feedback += `${idx + 1}. ${statusEmoji} **${isCorrect ? "CORRECT" : "INCORRECT"}**\n`;
+                feedback += `   Your answer: *${resp.answer || "N/A"}*\n`;
+                if (!isCorrect) {
+                    feedback += `   Correct choice: **${resp.correctAnswer || "Check module content"}**\n`;
+                }
+                feedback += "\n";
+            });
         }
 
         if (learning && result.result === "passed") {
