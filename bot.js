@@ -1596,7 +1596,6 @@ class TeamsBot extends TeamsActivityHandler {
                 const itemCorrect = userResp ? Boolean(userResp.correct) : false;
 
                 feedback += `${i + 1}. ${itemCorrect ? "✅ **CORRECT**" : "❌ **INCORRECT**"}\n`;
-                feedback += `   Your answer: *${userResp ? userResp.answer : "N/A"}*\n`;
 
                 if (!itemCorrect) {
                     // Live fetch strictly from the source of truth
